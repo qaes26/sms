@@ -117,6 +117,9 @@ class RedisSignalingBus implements ISignalingBus {
  */
 class FileSignalingBus implements ISignalingBus {
   private getFilePath(): string {
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return path.join('/tmp', 'sms_signaling.json');
+    }
     const dir = path.join(process.cwd(), '.data');
     if (!fs.existsSync(dir)) {
       try {

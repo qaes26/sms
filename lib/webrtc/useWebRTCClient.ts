@@ -238,10 +238,6 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
           if (!res.ok) return;
 
           const data = await res.json();
-          if (data.sessionStatus === 'ended') {
-            stopStream();
-            return;
-          }
 
           if (data.messages && Array.isArray(data.messages)) {
             for (const msg of data.messages) {

@@ -16,15 +16,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify session exists
-    const session = await SessionStore.get(sessionId);
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Ungültige oder beendete Sitzung.' },
-        { status: 404 }
-      );
-    }
-
     // Refresh session heartbeat
     await SessionStore.heartbeat(sessionId);
 
@@ -66,9 +57,9 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Check session status
+  // Check if session was explicitly marked as ended in persistent store
   const session = await SessionStore.get(sessionId);
-  if (!session || session.status !== 'active') {
+  if (session && session.status === 'ended') {
     return NextResponse.json({
       messages: [
         {
@@ -84,16 +75,18 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Touch heartbeat
-  await SessionStore.heartbeat(sessionId);
+  // Refresh heartbeat if session exists
+  if (session) {
+    await SessionStore.heartbeat(sessionId);
+  }
 
   // Retrieve messages intended for this role from persistent bus
   const messages = await SignalingBus.getMessages(sessionId, role, since);
 
   return NextResponse.json({
     messages,
-    sessionStatus: session.status,
-    streamStatus: session.streamStatus,
+    sessionStatus: session?.status || 'active',
+    streamStatus: session?.streamStatus || 'streaming',
     serverTime: Date.now(),
   });
 }
