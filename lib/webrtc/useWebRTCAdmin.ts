@@ -75,13 +75,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
         const data = await res.json();
 
-        if (data.sessionStatus === 'ended') {
-          cleanup();
-          activeSessionIdRef.current = null;
-          if (onSessionTerminatedRef.current) onSessionTerminatedRef.current();
-          return;
-        }
-
         if (!data.messages || !Array.isArray(data.messages)) return;
 
         // Find the offer message from client
@@ -232,13 +225,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
             );
             if (!incRes.ok) return;
             const incData = await incRes.json();
-
-            if (incData.sessionStatus === 'ended') {
-              cleanup();
-              activeSessionIdRef.current = null;
-              if (onSessionTerminatedRef.current) onSessionTerminatedRef.current();
-              return;
-            }
 
             if (incData.messages && Array.isArray(incData.messages)) {
               for (const msg of incData.messages) {
