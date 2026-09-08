@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify session exists
-    const session = SessionStore.get(sessionId);
+    const session = await SessionStore.get(sessionId);
     if (!session) {
       return NextResponse.json(
         { error: 'Ungültige oder beendete Sitzung.' },
@@ -26,17 +26,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Refresh session heartbeat
-    SessionStore.heartbeat(sessionId);
+    await SessionStore.heartbeat(sessionId);
 
     // Update session streamStatus if provided in signaling
     if (type === 'stream-status' && payload?.streamStatus) {
-      SessionStore.update(sessionId, { streamStatus: payload.streamStatus });
+      await SessionStore.update(sessionId, { streamStatus: payload.streamStatus });
     } else if (type === 'session-ended') {
-      SessionStore.end(sessionId);
+      await SessionStore.end(sessionId);
     }
 
-    // Post to signaling bus
-    const msg = SignalingBus.send(sessionId, sender, type, payload);
+    // Post to persistent signaling bus
+    const msg = await SignalingBus.send(sessionId, sender, type, payload);
 
     return NextResponse.json({
       success: true,
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
   }
 
   // Check session status
-  const session = SessionStore.get(sessionId);
+  const session = await SessionStore.get(sessionId);
   if (!session || session.status !== 'active') {
     return NextResponse.json({
       messages: [
@@ -85,10 +85,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Touch heartbeat
-  SessionStore.heartbeat(sessionId);
+  await SessionStore.heartbeat(sessionId);
 
-  // Retrieve messages intended for this role
-  const messages = SignalingBus.getMessages(sessionId, role, since);
+  // Retrieve messages intended for this role from persistent bus
+  const messages = await SignalingBus.getMessages(sessionId, role, since);
 
   return NextResponse.json({
     messages,

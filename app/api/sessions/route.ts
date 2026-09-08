@@ -14,7 +14,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const activeSessions = SessionStore.getActiveSessions().map((s) => ({
+  const rawSessions = await SessionStore.getActiveSessions();
+  const activeSessions = rawSessions.map((s) => ({
     id: s.id,
     maskedPhoneNumber: s.maskedPhoneNumber,
     createdAt: s.createdAt,

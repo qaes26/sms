@@ -55,8 +55,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create session in session store
-    const session = SessionStore.create(validation.e164, validation.masked);
+    // Create session in persistent session store
+    const session = await SessionStore.create(validation.e164, validation.masked);
 
     return NextResponse.json({
       success: true,

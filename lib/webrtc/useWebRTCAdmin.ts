@@ -1,14 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-  ],
-};
+import { getIceConfiguration } from '@/lib/webrtc/ice-config';
 
 interface UseWebRTCAdminProps {
   sessionId: string | null;
@@ -39,7 +32,9 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       pollIntervalRef.current = null;
     }
     if (pcRef.current) {
-      try { pcRef.current.close(); } catch (_) {}
+      try {
+        pcRef.current.close();
+      } catch (_) {}
       pcRef.current = null;
     }
     setRemoteStream(null);
@@ -50,7 +45,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   useEffect(() => {
     // Skip if same session is already connected
     if (sessionId === activeSessionIdRef.current) return;
-    
+
     // Cleanup previous connection
     cleanup();
     activeSessionIdRef.current = sessionId;
@@ -100,11 +95,12 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
           pollIntervalRef.current = null;
         }
 
-        // Create PeerConnection ONCE
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        // Create PeerConnection ONCE with configurable STUN + TURN
+        const iceConfig = getIceConfiguration();
+        const pc = new RTCPeerConnection(iceConfig);
         pcRef.current = pc;
 
-        // Handle incoming remote video track
+        // Handle incoming remote video track with fallback
         pc.ontrack = (event) => {
           let inboundStream: MediaStream | null = null;
           if (event.streams && event.streams[0]) {
@@ -140,12 +136,13 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
         pc.onconnectionstatechange = () => {
           if (!pcRef.current) return;
-          const state = pc.connectionState;
+          const state = pcRef.current.connectionState;
           if (state === 'connected') {
             setConnectionState('connected');
           } else if (state === 'failed') {
             setConnectionState('failed');
-            setError('Die Verbindung konnte nicht hergestellt werden.');
+            setError('Die Verbindung konnte nicht hergestellt werden. Bitte überprüfen Sie Ihre Netzwerkeinstellungen.');
+            console.error('[WebRTC Admin] PeerConnection failed for session:', sessionId);
           } else if (state === 'disconnected') {
             setConnectionState('disconnected');
           }
@@ -153,9 +150,11 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
         pc.oniceconnectionstatechange = () => {
           if (!pcRef.current) return;
-          const iceState = pc.iceConnectionState;
+          const iceState = pcRef.current.iceConnectionState;
           if (iceState === 'connected' || iceState === 'completed') {
             setConnectionState('connected');
+          } else if (iceState === 'failed') {
+            console.warn('[WebRTC Admin] ICE connection failed. TURN server might be needed across networks.');
           }
         };
 
@@ -241,7 +240,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
         };
 
         pollIntervalRef.current = setInterval(pollIncremental, 1000);
-
       } catch (err) {
         console.error('[WebRTC Admin Error]', err);
         setError('Die Verbindung konnte nicht hergestellt werden.');
@@ -257,7 +255,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       cleanup();
       activeSessionIdRef.current = null;
     };
-    // Only re-run when sessionId actually changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
@@ -269,11 +266,8 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       activeSessionIdRef.current = null;
       isAnsweredRef.current = false;
       cleanup();
-      // Force re-trigger by setting a new ref
       if (sessionId) {
         activeSessionIdRef.current = null;
-        // The effect won't re-run since sessionId didn't change,
-        // so we trigger manually
         isCleanedUpRef.current = false;
         setError(null);
         setConnectionState('connecting');

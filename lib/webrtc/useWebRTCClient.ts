@@ -1,13 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-  ],
-};
+import { getIceConfiguration } from '@/lib/webrtc/ice-config';
 
 interface UseWebRTCClientProps {
   sessionId: string | null;
@@ -35,10 +29,14 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       pollIntervalRef.current = null;
     }
 
-    // Stop all media tracks
+    // Stop every media track
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
-        track.stop();
+        try {
+          track.stop();
+        } catch (e) {
+          console.warn('[Track stop error]', e);
+        }
       });
       localStreamRef.current = null;
       setLocalStream(null);
@@ -46,20 +44,35 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
 
     // Close peer connection
     if (pcRef.current) {
-      pcRef.current.close();
+      try {
+        pcRef.current.close();
+      } catch (e) {
+        console.warn('[PC close error]', e);
+      }
       pcRef.current = null;
     }
 
     setIsStreaming(false);
     setConnectionState('stopped');
 
-    // Inform server that session has ended
+    // Inform signaling bus and terminate session in database
     if (sessionId) {
       try {
+        await fetch('/api/signaling', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            sender: 'client',
+            type: 'session-ended',
+            payload: { reason: 'Kamerafreigabe durch Benutzer beendet' },
+          }),
+        });
+      } catch (_) {}
+
+      try {
         await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-      } catch (err) {
-        // Ignore network error on termination
-      }
+      } catch (_) {}
     }
 
     if (onSessionEnded) {
@@ -111,8 +124,9 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       setIsStreaming(true);
       setConnectionState('creating-connection');
 
-      // Create RTCPeerConnection
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      // Create RTCPeerConnection with STUN + TURN config
+      const iceConfig = getIceConfiguration();
+      const pc = new RTCPeerConnection(iceConfig);
       pcRef.current = pc;
 
       // Add local video tracks to peer connection
@@ -141,13 +155,23 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       };
 
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
+        if (!pcRef.current) return;
+        const state = pcRef.current.connectionState;
+        if (state === 'connected') {
           setConnectionState('connected');
-        } else if (pc.connectionState === 'failed') {
+        } else if (state === 'failed') {
           setConnectionState('failed');
           setErrorMessage('Die Verbindung konnte nicht hergestellt werden.');
-        } else if (pc.connectionState === 'disconnected') {
+        } else if (state === 'disconnected') {
           setConnectionState('disconnected');
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        if (!pcRef.current) return;
+        const ice = pcRef.current.iceConnectionState;
+        if (ice === 'connected' || ice === 'completed') {
+          setConnectionState('connected');
         }
       };
 
@@ -212,11 +236,11 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
                 lastMessageTimestamp.current = msg.timestamp;
               }
 
-              if (msg.type === 'answer' && pcRef.current.signalingState !== 'stable') {
+              if (msg.type === 'answer' && pcRef.current && pcRef.current.signalingState !== 'stable') {
                 const answerDesc = new RTCSessionDescription(msg.payload);
                 await pcRef.current.setRemoteDescription(answerDesc);
                 setConnectionState('connected');
-              } else if (msg.type === 'ice-candidate' && msg.payload) {
+              } else if (msg.type === 'ice-candidate' && msg.payload && pcRef.current) {
                 try {
                   await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
                 } catch (iceErr) {
@@ -234,7 +258,6 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       };
 
       pollIntervalRef.current = setInterval(pollSignaling, 1200);
-
       return true;
     } catch (err: any) {
       console.error('[WebRTC Client Error]', err);
@@ -250,7 +273,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
     }
   }, [sessionId, stopStream]);
 
-  // Clean up on component unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (pollIntervalRef.current) {

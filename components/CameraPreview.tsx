@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { ShieldCheck, Loader2, Lock, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useRef, useCallback } from 'react';
+import { VideoOff, Radio, ShieldCheck } from 'lucide-react';
 
 interface CameraPreviewProps {
   stream: MediaStream | null;
@@ -15,81 +15,78 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   onStop,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [progress, setProgress] = useState(15);
+
+  const setVideoRef = useCallback(
+    (el: HTMLVideoElement | null) => {
+      videoRef.current = el;
+      if (el && stream) {
+        el.srcObject = stream;
+        el.play().catch((err) => console.warn('[CameraPreview Play Error]', err));
+      }
+    },
+    [stream]
+  );
 
   useEffect(() => {
     if (videoRef.current && stream) {
       videoRef.current.srcObject = stream;
-      videoRef.current.play().catch(() => {});
+      videoRef.current.play().catch((err) => console.warn('[CameraPreview Play Error]', err));
     }
   }, [stream]);
 
-  // Subtle realistic progress indicator for verification flow
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 92) return 92;
-        return prev + Math.floor(Math.random() * 8) + 3;
-      });
-    }, 1500);
-    return () => clearInterval(timer);
-  }, []);
-
   return (
-    <div className="w-full max-w-md mx-auto p-6 sm:p-8 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800 text-center transition-all">
-      {/* Hidden background video keeping camera stream active */}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className="hidden"
-        style={{ width: 1, height: 1, opacity: 0, pointerEvents: 'none' }}
-      />
+    <div className="w-full max-w-md mx-auto p-5 sm:p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800 transition-all">
+      {/* Header with Live indicator */}
+      <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="flex items-center gap-2.5">
+          <span className="relative flex h-3 w-3">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+          </span>
+          <h2 className="font-bold text-base text-zinc-900 dark:text-white">
+            Kamera aktiv
+          </h2>
+        </div>
 
-      {/* Security Verification Animation */}
-      <div className="relative w-20 h-20 mx-auto mb-6 flex items-center justify-center">
-        <div className="absolute inset-0 rounded-full border-4 border-blue-500/20 animate-ping" />
-        <div className="absolute inset-0 rounded-full border-4 border-t-blue-600 border-r-transparent border-b-blue-600 border-l-transparent animate-spin" />
-        <div className="w-14 h-14 rounded-full bg-blue-50 dark:bg-blue-950/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-inner">
-          <ShieldCheck className="w-7 h-7" />
+        {/* Live badge */}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 text-xs font-semibold uppercase tracking-wider">
+          <Radio className="w-3.5 h-3.5 animate-pulse" />
+          <span>Live</span>
         </div>
       </div>
 
-      <h1 className="text-xl font-bold text-zinc-900 dark:text-white tracking-tight">
-        Sicherheitsüberprüfung läuft
-      </h1>
+      {/* Visible Video Preview */}
+      <div className="relative aspect-[4/3] w-full bg-black rounded-xl overflow-hidden shadow-inner border border-zinc-800 flex items-center justify-center">
+        <video
+          ref={setVideoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover transform -scale-x-100"
+        />
 
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed max-w-xs mx-auto">
-        Ihre Identität wird über eine verschlüsselte Verbindung geprüft. Bitte halten Sie Ihr Gerät ruhig.
-      </p>
-
-      {/* Progress Bar */}
-      <div className="mt-6 space-y-2">
-        <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-          <span>Verifikation</span>
-          <span>{progress}%</span>
-        </div>
-        <div className="w-full h-2 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
-          <div
-            className="h-full bg-blue-600 rounded-full transition-all duration-700 ease-out"
-            style={{ width: `${progress}%` }}
-          />
+        {/* Technical connection badge */}
+        <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded-md text-[11px] text-zinc-300 font-mono">
+          {connectionState === 'connected' ? 'Verbunden' : 'Verbindung wird hergestellt...'}
         </div>
       </div>
 
-      {/* Trust Badges */}
-      <div className="mt-8 p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200/60 dark:border-zinc-800 text-xs text-zinc-500 dark:text-zinc-400 flex items-center justify-center gap-2">
-        <Lock className="w-3.5 h-3.5 text-zinc-400" />
-        <span>Ende-zu-Ende verschlüsselte Verbindung</span>
+      {/* Notification Banner */}
+      <div className="mt-4 p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-start gap-3">
+        <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
+        <p className="text-sm font-medium text-blue-900 dark:text-blue-200 leading-normal">
+          Ihre Kamera wird derzeit live übertragen.
+        </p>
       </div>
 
-      {/* Discreet cancel button */}
+      {/* Stop Streaming Button */}
       <button
+        id="stop-camera-button"
         onClick={onStop}
-        className="mt-6 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 underline underline-offset-4 transition-colors"
+        className="mt-5 w-full py-3.5 px-5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-red-600/20"
       >
-        Vorgang abbrechen
+        <VideoOff className="w-4 h-4" />
+        <span>Kamerafreigabe beenden</span>
       </button>
     </div>
   );
