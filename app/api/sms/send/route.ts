@@ -37,8 +37,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Exact required German SMS message
-    const SMS_TEXT = 'Unser geschätzter Kunde, Ihre Anfrage wird gerade gesendet.';
+    // SMS message text
+    const SMS_TEXT = 'عميلنا العزيز، نحن بانتظار الموافقة.';
 
     // Send SMS via configured server-side provider
     const smsProvider = getSmsProvider();

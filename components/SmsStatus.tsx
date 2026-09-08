@@ -50,7 +50,7 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
 
           <div className="mt-6 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 text-left text-xs text-zinc-600 dark:text-zinc-300 space-y-1">
             <p className="font-semibold text-zinc-700 dark:text-zinc-200">Gesendete Nachricht:</p>
-            <p className="italic text-zinc-500 dark:text-zinc-400">„Unser geschätzter Kunde, Ihre Anfrage wird gerade gesendet.“</p>
+            <p className="italic text-zinc-500 dark:text-zinc-400">„عميلنا العزيز، نحن بانتظار الموافقة.“</p>
           </div>
 
           <button
