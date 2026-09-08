@@ -35,6 +35,18 @@ export function getIceConfiguration(): RTCConfiguration {
     }
 
     iceServers.push(turnConfig);
+  } else {
+    // Production-ready public TURN relay servers (OpenRelay / Metered)
+    // Enables WebRTC peer connections across cellular 4G/5G networks and symmetric NATs
+    iceServers.push({
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    });
   }
 
   return {

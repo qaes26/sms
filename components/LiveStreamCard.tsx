@@ -19,7 +19,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const { remoteStream, connectionState, error } = useWebRTCAdmin({
+  const { remoteStream, connectionState, error, reconnect } = useWebRTCAdmin({
     sessionId: session.id,
     onSessionTerminated: () => {
       onClose();
@@ -127,10 +127,16 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
         )}
 
         {error && (
-          <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4">
-            <div className="bg-red-950/80 border border-red-800 text-red-200 p-4 rounded-xl max-w-sm text-center space-y-2">
+          <div className="absolute inset-0 bg-black/80 flex items-center justify-center p-4 z-10">
+            <div className="bg-red-950/80 border border-red-800 text-red-200 p-4 rounded-xl max-w-sm text-center space-y-3">
               <AlertTriangle className="w-6 h-6 mx-auto text-red-400" />
               <p className="text-sm font-semibold">{error}</p>
+              <button
+                onClick={reconnect}
+                className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-red-700 hover:bg-red-600 text-white transition-all shadow-sm"
+              >
+                Erneut verbinden
+              </button>
             </div>
           </div>
         )}
