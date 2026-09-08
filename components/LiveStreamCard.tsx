@@ -63,8 +63,8 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
               ID: {session.id.substring(0, 8)}...
             </span>
             <ConnectionStatus
-              status={connectionState}
-              isLive={connectionState === 'connected'}
+              status={remoteStream ? 'connected' : connectionState}
+              isLive={!!remoteStream && connectionState === 'connected'}
             />
           </div>
           <div className="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">

@@ -19,6 +19,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   const isCleanedUpRef = useRef<boolean>(false);
   const activeSessionIdRef = useRef<string | null>(null);
   const onSessionTerminatedRef = useRef(onSessionTerminated);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   // Keep callback ref updated without triggering re-connect
   useEffect(() => {
@@ -40,6 +41,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     setRemoteStream(null);
     setConnectionState('disconnected');
     isAnsweredRef.current = false;
+    pendingCandidatesRef.current = [];
   }, []);
 
   useEffect(() => {
@@ -58,6 +60,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     isCleanedUpRef.current = false;
     setError(null);
     setConnectionState('connecting');
+    pendingCandidatesRef.current = [];
 
     let latestTimestamp = 0;
 
@@ -81,7 +84,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
         if (!data.messages || !Array.isArray(data.messages)) return;
 
-        // Find the offer message
+        // Find the offer message from client
         const offerMsg = data.messages.find(
           (msg: any) => msg.type === 'offer' && msg.payload
         );
@@ -100,8 +103,9 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
         const pc = new RTCPeerConnection(iceConfig);
         pcRef.current = pc;
 
-        // Handle incoming remote video track with fallback
+        // Handle incoming remote video track
         pc.ontrack = (event) => {
+          console.log('[WebRTC Admin] ontrack received:', event.track.kind, event.streams);
           let inboundStream: MediaStream | null = null;
           if (event.streams && event.streams[0]) {
             inboundStream = event.streams[0];
@@ -134,9 +138,28 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
           }
         };
 
+        // Comprehensive WebRTC state logging
+        pc.onsignalingstatechange = () => {
+          console.log('[WebRTC Admin] signalingState:', pc.signalingState);
+        };
+
+        pc.onicegatheringstatechange = () => {
+          console.log('[WebRTC Admin] iceGatheringState:', pc.iceGatheringState);
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          console.log('[WebRTC Admin] iceConnectionState:', pc.iceConnectionState);
+          const iceState = pc.iceConnectionState;
+          if (iceState === 'connected' || iceState === 'completed') {
+            setConnectionState('connected');
+          } else if (iceState === 'failed') {
+            console.warn('[WebRTC Admin] ICE connection failed. A TURN server may be required for cross-network streaming.');
+          }
+        };
+
         pc.onconnectionstatechange = () => {
-          if (!pcRef.current) return;
-          const state = pcRef.current.connectionState;
+          console.log('[WebRTC Admin] connectionState:', pc.connectionState);
+          const state = pc.connectionState;
           if (state === 'connected') {
             setConnectionState('connected');
           } else if (state === 'failed') {
@@ -148,20 +171,10 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
           }
         };
 
-        pc.oniceconnectionstatechange = () => {
-          if (!pcRef.current) return;
-          const iceState = pcRef.current.iceConnectionState;
-          if (iceState === 'connected' || iceState === 'completed') {
-            setConnectionState('connected');
-          } else if (iceState === 'failed') {
-            console.warn('[WebRTC Admin] ICE connection failed. TURN server might be needed across networks.');
-          }
-        };
-
         // Set remote description (the offer from client)
         await pc.setRemoteDescription(new RTCSessionDescription(offerMsg.payload));
 
-        // Add any existing ICE candidates
+        // Add any existing ICE candidates that arrived with or before the offer
         const candidateMsgs = data.messages.filter(
           (msg: any) => msg.type === 'ice-candidate' && msg.payload
         );
@@ -171,6 +184,18 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
           } catch (e) {
             console.warn('[WebRTC Admin] Early candidate error', e);
           }
+        }
+
+        // Apply any queued pending candidates
+        if (pendingCandidatesRef.current.length > 0) {
+          for (const cand of pendingCandidatesRef.current) {
+            try {
+              await pc.addIceCandidate(new RTCIceCandidate(cand));
+            } catch (e) {
+              console.warn('[WebRTC Admin] Pending candidate error', e);
+            }
+          }
+          pendingCandidatesRef.current = [];
         }
 
         // Create and send answer
@@ -221,10 +246,14 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
                   latestTimestamp = msg.timestamp;
                 }
                 if (msg.type === 'ice-candidate' && msg.payload && pcRef.current) {
-                  try {
-                    await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
-                  } catch (e) {
-                    console.warn('[WebRTC Admin] ICE add error', e);
+                  if (pcRef.current.remoteDescription) {
+                    try {
+                      await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
+                    } catch (e) {
+                      console.warn('[WebRTC Admin] ICE add error', e);
+                    }
+                  } else {
+                    pendingCandidatesRef.current.push(msg.payload);
                   }
                 } else if (msg.type === 'session-ended') {
                   cleanup();

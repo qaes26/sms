@@ -19,6 +19,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
   const lastMessageTimestamp = useRef<number>(0);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isTerminatedRef = useRef<boolean>(false);
+  const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
 
   // Stop all camera tracks and WebRTC connections
   const stopStream = useCallback(async () => {
@@ -35,7 +36,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         try {
           track.stop();
         } catch (e) {
-          console.warn('[Track stop error]', e);
+          console.warn('[Client] Track stop error', e);
         }
       });
       localStreamRef.current = null;
@@ -47,11 +48,12 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       try {
         pcRef.current.close();
       } catch (e) {
-        console.warn('[PC close error]', e);
+        console.warn('[Client] PC close error', e);
       }
       pcRef.current = null;
     }
 
+    pendingCandidatesRef.current = [];
     setIsStreaming(false);
     setConnectionState('stopped');
 
@@ -84,7 +86,6 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (sessionId && isStreaming) {
-        // Send keepalive request to end session
         navigator.sendBeacon(`/api/sessions/${sessionId}`);
       }
       if (localStreamRef.current) {
@@ -108,6 +109,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
     try {
       setErrorMessage(null);
       setConnectionState('requesting-permission');
+      pendingCandidatesRef.current = [];
 
       // Request camera with mobile-friendly constraints
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -154,9 +156,28 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         }
       };
 
+      // Comprehensive WebRTC state logging
+      pc.onsignalingstatechange = () => {
+        console.log('[WebRTC Client] signalingState:', pc.signalingState);
+      };
+
+      pc.onicegatheringstatechange = () => {
+        console.log('[WebRTC Client] iceGatheringState:', pc.iceGatheringState);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[WebRTC Client] iceConnectionState:', pc.iceConnectionState);
+        const ice = pc.iceConnectionState;
+        if (ice === 'connected' || ice === 'completed') {
+          setConnectionState('connected');
+        } else if (ice === 'failed') {
+          console.warn('[WebRTC Client] ICE connection failed. A TURN server may be required for cross-network streaming.');
+        }
+      };
+
       pc.onconnectionstatechange = () => {
-        if (!pcRef.current) return;
-        const state = pcRef.current.connectionState;
+        console.log('[WebRTC Client] connectionState:', pc.connectionState);
+        const state = pc.connectionState;
         if (state === 'connected') {
           setConnectionState('connected');
         } else if (state === 'failed') {
@@ -167,14 +188,6 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         }
       };
 
-      pc.oniceconnectionstatechange = () => {
-        if (!pcRef.current) return;
-        const ice = pcRef.current.iceConnectionState;
-        if (ice === 'connected' || ice === 'completed') {
-          setConnectionState('connected');
-        }
-      };
-
       // Create offer
       const offer = await pc.createOffer({
         offerToReceiveVideo: false,
@@ -182,7 +195,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       });
       await pc.setLocalDescription(offer);
 
-      // Send offer to signaling bus
+      // Send offer to persistent signaling bus
       await fetch('/api/signaling', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -240,11 +253,28 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
                 const answerDesc = new RTCSessionDescription(msg.payload);
                 await pcRef.current.setRemoteDescription(answerDesc);
                 setConnectionState('connected');
+
+                // Apply any queued ICE candidates that arrived before the answer
+                if (pendingCandidatesRef.current.length > 0) {
+                  for (const cand of pendingCandidatesRef.current) {
+                    try {
+                      await pcRef.current.addIceCandidate(new RTCIceCandidate(cand));
+                    } catch (err) {
+                      console.warn('[WebRTC Client] Error applying queued candidate', err);
+                    }
+                  }
+                  pendingCandidatesRef.current = [];
+                }
               } else if (msg.type === 'ice-candidate' && msg.payload && pcRef.current) {
-                try {
-                  await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
-                } catch (iceErr) {
-                  console.warn('[WebRTC Client] Could not add ICE candidate', iceErr);
+                if (pcRef.current.remoteDescription) {
+                  try {
+                    await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
+                  } catch (iceErr) {
+                    console.warn('[WebRTC Client] Could not add ICE candidate', iceErr);
+                  }
+                } else {
+                  // Queue candidate until remote description is set
+                  pendingCandidatesRef.current.push(msg.payload);
                 }
               } else if (msg.type === 'session-ended') {
                 stopStream();
@@ -257,7 +287,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         }
       };
 
-      pollIntervalRef.current = setInterval(pollSignaling, 1200);
+      pollIntervalRef.current = setInterval(pollSignaling, 1000);
       return true;
     } catch (err: any) {
       console.error('[WebRTC Client Error]', err);
