@@ -188,7 +188,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       setConnectionState('waiting-admin');
 
       // Start polling for signaling responses (answers, candidates, termination)
-      lastMessageTimestamp.current = Date.now() - 5000;
+      lastMessageTimestamp.current = 0;
       isTerminatedRef.current = false;
 
       const pollSignaling = async () => {

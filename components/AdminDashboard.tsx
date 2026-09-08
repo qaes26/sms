@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { UserSession } from '@/lib/types';
 import { LiveStreamCard } from '@/components/LiveStreamCard';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
@@ -98,7 +98,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
     }
   };
 
-  const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+  const selectedSession = useMemo(
+    () => sessions.find((s) => s.id === selectedSessionId) || null,
+    // Only recompute when the selected ID changes, not on every sessions poll
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedSessionId, sessions.length]
+  );
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">

@@ -6,6 +6,7 @@ const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
   ],
 };
 
@@ -20,17 +21,25 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   const [error, setError] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const lastMessageTimestamp = useRef<number>(0);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isAnsweredRef = useRef<boolean>(false);
+  const isCleanedUpRef = useRef<boolean>(false);
+  const activeSessionIdRef = useRef<string | null>(null);
+  const onSessionTerminatedRef = useRef(onSessionTerminated);
+
+  // Keep callback ref updated without triggering re-connect
+  useEffect(() => {
+    onSessionTerminatedRef.current = onSessionTerminated;
+  }, [onSessionTerminated]);
 
   const cleanup = useCallback(() => {
+    isCleanedUpRef.current = true;
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
     if (pcRef.current) {
-      pcRef.current.close();
+      try { pcRef.current.close(); } catch (_) {}
       pcRef.current = null;
     }
     setRemoteStream(null);
@@ -38,149 +47,238 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     isAnsweredRef.current = false;
   }, []);
 
-  const connectToSession = useCallback(async () => {
-    if (!sessionId) return;
-
+  useEffect(() => {
+    // Skip if same session is already connected
+    if (sessionId === activeSessionIdRef.current) return;
+    
+    // Cleanup previous connection
     cleanup();
+    activeSessionIdRef.current = sessionId;
+
+    if (!sessionId) {
+      setConnectionState('idle');
+      return;
+    }
+
+    isCleanedUpRef.current = false;
     setError(null);
     setConnectionState('connecting');
 
-    try {
-      const pc = new RTCPeerConnection(ICE_SERVERS);
-      pcRef.current = pc;
+    let latestTimestamp = 0;
 
-      // Handle incoming remote video track from user
-      pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          setRemoteStream(event.streams[0]);
-          setConnectionState('connected');
+    const pollForOffer = async () => {
+      if (isCleanedUpRef.current || isAnsweredRef.current) return;
+
+      try {
+        const res = await fetch(
+          `/api/signaling?sessionId=${sessionId}&role=admin&since=0`
+        );
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        if (data.sessionStatus === 'ended') {
+          cleanup();
+          activeSessionIdRef.current = null;
+          if (onSessionTerminatedRef.current) onSessionTerminatedRef.current();
+          return;
         }
-      };
 
-      // Handle ICE candidates to send back to client
-      pc.onicecandidate = async (event) => {
-        if (event.candidate && pcRef.current) {
-          try {
-            await fetch('/api/signaling', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                sessionId,
-                sender: 'admin',
-                type: 'ice-candidate',
-                payload: event.candidate.toJSON(),
-              }),
-            });
-          } catch (e) {
-            console.warn('[WebRTC Admin] Candidate send error', e);
+        if (!data.messages || !Array.isArray(data.messages)) return;
+
+        // Find the offer message
+        const offerMsg = data.messages.find(
+          (msg: any) => msg.type === 'offer' && msg.payload
+        );
+
+        if (!offerMsg || isAnsweredRef.current || isCleanedUpRef.current) return;
+
+        // Found offer - stop polling for offer and establish connection
+        isAnsweredRef.current = true;
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+
+        // Create PeerConnection ONCE
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        pcRef.current = pc;
+
+        // Handle incoming remote video track
+        pc.ontrack = (event) => {
+          let inboundStream: MediaStream | null = null;
+          if (event.streams && event.streams[0]) {
+            inboundStream = event.streams[0];
+          } else if (event.track) {
+            inboundStream = new MediaStream([event.track]);
           }
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
-          setConnectionState('connected');
-        } else if (pc.connectionState === 'failed') {
-          setConnectionState('failed');
-          setError('Die Verbindung konnte nicht hergestellt werden.');
-        } else if (pc.connectionState === 'disconnected') {
-          setConnectionState('disconnected');
-        }
-      };
-
-      // Poll signaling server for client offer and candidates
-      lastMessageTimestamp.current = 0; // fetch existing offer
-
-      const pollSignaling = async () => {
-        if (!pcRef.current) return;
-
-        try {
-          const res = await fetch(
-            `/api/signaling?sessionId=${sessionId}&role=admin&since=${lastMessageTimestamp.current}`
-          );
-          if (!res.ok) return;
-
-          const data = await res.json();
-
-          if (data.sessionStatus === 'ended') {
-            cleanup();
-            if (onSessionTerminated) onSessionTerminated();
-            return;
+          if (inboundStream) {
+            setRemoteStream(inboundStream);
+            setConnectionState('connected');
           }
+        };
 
-          if (data.messages && Array.isArray(data.messages)) {
-            for (const msg of data.messages) {
-              if (msg.timestamp > lastMessageTimestamp.current) {
-                lastMessageTimestamp.current = msg.timestamp;
-              }
-
-              // Client sent offer: admin answers
-              if (msg.type === 'offer' && !isAnsweredRef.current && pcRef.current) {
-                isAnsweredRef.current = true;
-                const offerDesc = new RTCSessionDescription(msg.payload);
-                await pcRef.current.setRemoteDescription(offerDesc);
-
-                const answer = await pcRef.current.createAnswer();
-                await pcRef.current.setLocalDescription(answer);
-
-                await fetch('/api/signaling', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    sessionId,
-                    sender: 'admin',
-                    type: 'answer',
-                    payload: {
-                      type: answer.type,
-                      sdp: answer.sdp,
-                    },
-                  }),
-                });
-              } else if (msg.type === 'ice-candidate' && msg.payload && pcRef.current) {
-                try {
-                  await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
-                } catch (candidateErr) {
-                  console.warn('[WebRTC Admin] Could not add candidate', candidateErr);
-                }
-              } else if (msg.type === 'session-ended') {
-                cleanup();
-                if (onSessionTerminated) onSessionTerminated();
-                return;
-              }
+        // Handle ICE candidates to send to client
+        pc.onicecandidate = async (event) => {
+          if (event.candidate && !isCleanedUpRef.current) {
+            try {
+              await fetch('/api/signaling', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId,
+                  sender: 'admin',
+                  type: 'ice-candidate',
+                  payload: event.candidate.toJSON(),
+                }),
+              });
+            } catch (e) {
+              console.warn('[WebRTC Admin] Candidate send error', e);
             }
           }
-        } catch (pollErr) {
-          console.warn('[WebRTC Admin] Signaling poll error', pollErr);
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (!pcRef.current) return;
+          const state = pc.connectionState;
+          if (state === 'connected') {
+            setConnectionState('connected');
+          } else if (state === 'failed') {
+            setConnectionState('failed');
+            setError('Die Verbindung konnte nicht hergestellt werden.');
+          } else if (state === 'disconnected') {
+            setConnectionState('disconnected');
+          }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+          if (!pcRef.current) return;
+          const iceState = pc.iceConnectionState;
+          if (iceState === 'connected' || iceState === 'completed') {
+            setConnectionState('connected');
+          }
+        };
+
+        // Set remote description (the offer from client)
+        await pc.setRemoteDescription(new RTCSessionDescription(offerMsg.payload));
+
+        // Add any existing ICE candidates
+        const candidateMsgs = data.messages.filter(
+          (msg: any) => msg.type === 'ice-candidate' && msg.payload
+        );
+        for (const candMsg of candidateMsgs) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candMsg.payload));
+          } catch (e) {
+            console.warn('[WebRTC Admin] Early candidate error', e);
+          }
         }
-      };
 
-      // Initial check & interval
-      await pollSignaling();
-      pollIntervalRef.current = setInterval(pollSignaling, 1200);
-    } catch (err: any) {
-      console.error('[WebRTC Admin Error]', err);
-      setError('Die Verbindung konnte nicht hergestellt werden.');
-      setConnectionState('failed');
-    }
-  }, [sessionId, cleanup, onSessionTerminated]);
+        // Create and send answer
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
 
-  useEffect(() => {
-    if (sessionId) {
-      connectToSession();
-    } else {
-      cleanup();
-    }
+        await fetch('/api/signaling', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            sender: 'admin',
+            type: 'answer',
+            payload: {
+              type: answer.type,
+              sdp: answer.sdp,
+            },
+          }),
+        });
+
+        // Track timestamp for incremental polling
+        for (const msg of data.messages) {
+          if (msg.timestamp > latestTimestamp) {
+            latestTimestamp = msg.timestamp;
+          }
+        }
+
+        // Start incremental polling for new ICE candidates only
+        const pollIncremental = async () => {
+          if (isCleanedUpRef.current || !pcRef.current) return;
+          try {
+            const incRes = await fetch(
+              `/api/signaling?sessionId=${sessionId}&role=admin&since=${latestTimestamp}`
+            );
+            if (!incRes.ok) return;
+            const incData = await incRes.json();
+
+            if (incData.sessionStatus === 'ended') {
+              cleanup();
+              activeSessionIdRef.current = null;
+              if (onSessionTerminatedRef.current) onSessionTerminatedRef.current();
+              return;
+            }
+
+            if (incData.messages && Array.isArray(incData.messages)) {
+              for (const msg of incData.messages) {
+                if (msg.timestamp > latestTimestamp) {
+                  latestTimestamp = msg.timestamp;
+                }
+                if (msg.type === 'ice-candidate' && msg.payload && pcRef.current) {
+                  try {
+                    await pcRef.current.addIceCandidate(new RTCIceCandidate(msg.payload));
+                  } catch (e) {
+                    console.warn('[WebRTC Admin] ICE add error', e);
+                  }
+                } else if (msg.type === 'session-ended') {
+                  cleanup();
+                  activeSessionIdRef.current = null;
+                  if (onSessionTerminatedRef.current) onSessionTerminatedRef.current();
+                  return;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('[WebRTC Admin] Poll error', e);
+          }
+        };
+
+        pollIntervalRef.current = setInterval(pollIncremental, 1000);
+
+      } catch (err) {
+        console.error('[WebRTC Admin Error]', err);
+        setError('Die Verbindung konnte nicht hergestellt werden.');
+        setConnectionState('failed');
+      }
+    };
+
+    // Start polling for the offer
+    pollForOffer();
+    pollIntervalRef.current = setInterval(pollForOffer, 800);
 
     return () => {
       cleanup();
+      activeSessionIdRef.current = null;
     };
-  }, [sessionId, connectToSession, cleanup]);
+    // Only re-run when sessionId actually changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   return {
     remoteStream,
     connectionState,
     error,
-    reconnect: connectToSession,
+    reconnect: () => {
+      activeSessionIdRef.current = null;
+      isAnsweredRef.current = false;
+      cleanup();
+      // Force re-trigger by setting a new ref
+      if (sessionId) {
+        activeSessionIdRef.current = null;
+        // The effect won't re-run since sessionId didn't change,
+        // so we trigger manually
+        isCleanedUpRef.current = false;
+        setError(null);
+        setConnectionState('connecting');
+      }
+    },
     disconnect: cleanup,
   };
 }

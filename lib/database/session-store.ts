@@ -13,8 +13,8 @@ declare global {
 const sessions: Map<string, UserSession> =
   globalThis.__appSessionStore || (globalThis.__appSessionStore = new Map());
 
-// Heartbeat timeout threshold in milliseconds (e.g. 25 seconds)
-const HEARTBEAT_TIMEOUT_MS = 25 * 1000;
+// Heartbeat timeout threshold in milliseconds (5 minutes to allow natural user interaction)
+const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export class SessionStore {
   /**

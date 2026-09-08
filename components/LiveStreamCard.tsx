@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { useWebRTCAdmin } from '@/lib/webrtc/useWebRTCAdmin';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { UserSession } from '@/lib/types';
@@ -26,11 +26,16 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
     },
   });
 
-  useEffect(() => {
-    if (videoRef.current && remoteStream) {
-      videoRef.current.srcObject = remoteStream;
-    }
-  }, [remoteStream]);
+  const setVideoRef = useCallback(
+    (el: HTMLVideoElement | null) => {
+      videoRef.current = el;
+      if (el && remoteStream) {
+        el.srcObject = remoteStream;
+        el.play().catch((e) => console.warn('[Admin Video Autoplay]', e));
+      }
+    },
+    [remoteStream]
+  );
 
   const toggleFullscreen = () => {
     if (videoRef.current) {
@@ -98,7 +103,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
       <div className="relative aspect-video w-full bg-black flex items-center justify-center overflow-hidden">
         {remoteStream ? (
           <video
-            ref={videoRef}
+            ref={setVideoRef}
             autoPlay
             playsInline
             muted
