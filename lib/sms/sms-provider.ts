@@ -97,9 +97,6 @@ export class TestSmsProvider implements ISmsProvider {
   }
 }
 
-/**
- * Provider factory returning the configured SMS provider instance based on SMS_PROVIDER env variable.
- */
 export function getSmsProvider(): ISmsProvider {
   const provider = (process.env.SMS_PROVIDER || '').toLowerCase().trim();
 
@@ -107,6 +104,11 @@ export function getSmsProvider(): ISmsProvider {
     return new TestSmsProvider();
   }
 
-  // Default is Twilio
-  return new TwilioSmsProvider();
+  // If Twilio credentials are configured, use Twilio
+  if (process.env.SMS_API_KEY && process.env.SMS_API_SECRET && process.env.SMS_SENDER) {
+    return new TwilioSmsProvider();
+  }
+
+  // Fallback to TestSmsProvider so user can test on Vercel without needing Twilio keys yet
+  return new TestSmsProvider();
 }
