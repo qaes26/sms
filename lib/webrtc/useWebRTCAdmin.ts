@@ -42,12 +42,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       callRef.current = null;
     }
 
-    if (peerRef.current) {
-      try {
-        peerRef.current.destroy();
-      } catch (_) {}
-      peerRef.current = null;
-    }
+    // Removed peer.destroy() from normal state cleanup
 
     setRemoteStream(null);
     setConnectionState('disconnected');
@@ -58,6 +53,11 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   const connectAdminPeer = useCallback(async () => {
     if (!sessionId) {
       setConnectionState('idle');
+      return;
+    }
+
+    if (peerRef.current) {
+      console.log('[WebRTC Admin] Peer already initialized. Skipping re-init.');
       return;
     }
 
@@ -72,28 +72,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     setError(null);
 
     const peerId = getAdminPeerId(sessionId);
-
-    // If existing Peer instance is already open with this ID, reuse it without destroying!
-    if (peerRef.current && !peerRef.current.destroyed && peerRef.current.id === peerId) {
-      console.log('[WebRTC Admin] Reusing existing open Peer connection for ID:', peerId);
-      if (callRef.current) {
-        try {
-          callRef.current.close();
-        } catch (_) {}
-        callRef.current = null;
-      }
-      setRemoteStream(null);
-      setConnectionState('waiting-for-call');
-      return;
-    }
-
-    // Otherwise clean up previous peer instance
-    if (peerRef.current) {
-      try {
-        peerRef.current.destroy();
-      } catch (_) {}
-      peerRef.current = null;
-    }
 
     setConnectionState('connecting');
 
@@ -232,6 +210,18 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       activeSessionIdRef.current = null;
     };
   }, [sessionId, connectAdminPeer, cleanup]);
+
+  // Clean up peer only on final unmount
+  useEffect(() => {
+    return () => {
+      if (peerRef.current) {
+        try {
+          peerRef.current.destroy();
+        } catch (_) {}
+        peerRef.current = null;
+      }
+    };
+  }, []);
 
   return {
     remoteStream,
