@@ -1,47 +1,35 @@
 import type { PeerOptions } from 'peerjs';
 
-/**
- * WebRTC ICE Server Configuration.
- * Configured with Google public STUN servers for NAT traversal across Wi-Fi and 4G networks.
- */
-export const PEER_ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
+export const iceServers: RTCIceServer[] = [
+  {
+    urls: 'stun:stun.relay.metered.ca:80',
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80',
+    username: '78d387946f097b066e309eed',
+    credential: 'RwVC3eS9k3PB654i',
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:80?transport=tcp',
+    username: '78d387946f097b066e309eed',
+    credential: 'RwVC3eS9k3PB654i',
+  },
+  {
+    urls: 'turn:global.relay.metered.ca:443',
+    username: '78d387946f097b066e309eed',
+    credential: 'RwVC3eS9k3PB654i',
+  },
+  {
+    urls: 'turns:global.relay.metered.ca:443?transport=tcp',
+    username: '78d387946f097b066e309eed',
+    credential: 'RwVC3eS9k3PB654i',
+  },
 ];
 
 /**
  * Builds PeerJS initialization options using free PeerJS Cloud signaling
- * and Google STUN servers.
  */
 export function getPeerJSOptions(): PeerOptions {
-  const iceServers: RTCIceServer[] = [...PEER_ICE_SERVERS];
-
-  // Optional TURN server from environment variables for symmetric NAT traversal
-  const turnServerUrl = process.env.NEXT_PUBLIC_TURN_SERVER;
-  const turnUsername = process.env.NEXT_PUBLIC_TURN_USERNAME;
-  const turnCredential = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
-
-  if (turnServerUrl) {
-    const turnConfig: RTCIceServer = {
-      urls: turnServerUrl.split(',').map((url) => url.trim()),
-    };
-    if (turnUsername) turnConfig.username = turnUsername;
-    if (turnCredential) turnConfig.credential = turnCredential;
-    iceServers.push(turnConfig);
-  } else {
-    // OpenRelay backup for restricted cellular networks
-    iceServers.push({
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    });
-  }
-
   return {
     debug: 1,
     config: {

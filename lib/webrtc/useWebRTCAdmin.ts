@@ -116,12 +116,12 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       peer.on('call', (incomingCall: MediaConnection) => {
         console.log('[WebRTC Admin] Incoming call received from:', incomingCall.peer);
 
-        // Close any lingering previous call
-        if (callRef.current && callRef.current !== incomingCall) {
-          try {
-            callRef.current.close();
-          } catch (_) {}
+        if (callRef.current) {
+          // تجاهل أي اتصال مكرر إذا كان البث قيد العمل
+          console.log('[WebRTC Admin] Ignoring duplicate incoming call because an active call exists');
+          return;
         }
+        
         callRef.current = incomingCall;
         setConnectionState('call-received');
 
