@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "signaling": "node signaling-server.js",
     "test:e2e": "node test-e2e.mjs"
   },
   "dependencies": {
@@ -16,6 +15,7 @@
     "libphonenumber-js": "^1.11.19",
     "lucide-react": "^0.475.0",
     "next": "^14.2.24",
+    "peerjs": "^1.5.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.6.0"

@@ -1,10 +1,18 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useWebRTCAdmin } from '@/lib/webrtc/useWebRTCAdmin';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { UserSession } from '@/lib/types';
-import { Phone, Clock, Maximize2, X, AlertTriangle } from 'lucide-react';
+import {
+  Phone,
+  Clock,
+  Maximize2,
+  X,
+  AlertTriangle,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 
 interface LiveStreamCardProps {
   session: UserSession;
@@ -18,6 +26,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
   onTerminate,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [isMuted, setIsMuted] = useState<boolean>(true);
 
   const { remoteStream, connectionState, error, reconnect } = useWebRTCAdmin({
     sessionId: session.id,
@@ -31,11 +40,30 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
       videoRef.current = el;
       if (el && remoteStream) {
         el.srcObject = remoteStream;
+        el.muted = isMuted;
         el.play().catch((e) => console.warn('[Admin Video Autoplay]', e));
       }
     },
-    [remoteStream]
+    [remoteStream, isMuted]
   );
+
+  useEffect(() => {
+    if (videoRef.current && remoteStream) {
+      videoRef.current.srcObject = remoteStream;
+      videoRef.current.muted = isMuted;
+      videoRef.current.play().catch((e) => console.warn('[Admin Video Autoplay]', e));
+    }
+  }, [remoteStream, isMuted]);
+
+  const toggleMute = () => {
+    setIsMuted((prev) => {
+      const next = !prev;
+      if (videoRef.current) {
+        videoRef.current.muted = next;
+      }
+      return next;
+    });
+  };
 
   const toggleFullscreen = () => {
     if (videoRef.current) {
@@ -82,6 +110,20 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {remoteStream && (
+            <button
+              onClick={toggleMute}
+              title={isMuted ? 'Ton einschalten' : 'Ton stummschalten'}
+              className={`p-2 rounded-lg transition-all ${
+                isMuted
+                  ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+              }`}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </button>
+          )}
+
           <button
             onClick={toggleFullscreen}
             title="Vollbild"
@@ -106,7 +148,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
             ref={setVideoRef}
             autoPlay
             playsInline
-            muted
+            muted={isMuted}
             className="w-full h-full object-contain"
           />
         ) : (
@@ -121,7 +163,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
               Verbindung wird hergestellt...
             </p>
             <p className="text-xs text-zinc-500 max-w-xs">
-              Warten auf Videodaten des Smartphones über WebRTC PeerConnection.
+              Warten auf eingehenden Video- und Audio-Stream vom Smartphone über PeerJS Cloud.
             </p>
           </div>
         )}
@@ -145,7 +187,7 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
       {/* Footer controls */}
       <div className="p-3 bg-zinc-50 dark:bg-zinc-800/40 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
         <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          Live-Videoübertragung aktiv (WebRTC)
+          Live-Audio/Videoübertragung aktiv (PeerJS WebRTC)
         </span>
         <button
           onClick={() => onTerminate(session.id)}

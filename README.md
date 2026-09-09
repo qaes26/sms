@@ -148,18 +148,24 @@ Da moderne Mobil-Browser (`getUserMedia`) den Kamerazugriff ausschließlich übe
 
 ---
 
-## 8. WebRTC Signaling-Architektur
+## 8. WebRTC Signaling-Architektur mit PeerJS auf Vercel
 
-### Serverless-kompatibles Signaling auf Vercel
+### Serverless-kompatibles Signaling über PeerJS Cloud
 Klassische WebSocket-Server (z. B. `ws` oder `socket.io`) benötigen einen permanent laufenden Hintergrundprozess, den serverlose Umgebungen (wie Vercel Lambdas) nicht bereitstellen können.
 
-Diese Anwendung löst dies über eine integrierte **HTTP-Signaling-Pipeline** (`/api/signaling`):
-1. Das Smartphone (Client) sendet sein SDP Offer und ICE-Kandidaten per POST an `/api/signaling`.
-2. Das Admin-Dashboard ruft offene Signale für die jeweilige Sitzungs-ID ab und sendet das SDP Answer zurück.
-3. Die WebRTC PeerConnection etabliert sich direkt Peer-to-Peer zwischen dem Smartphone und dem Browser des Administrators.
-4. Dieser Ansatz funktioniert **ohne externe Drittanbieter-Dienste** direkt auf Vercel.
-
-*(Optional für VPS/Docker-Deployments)*: Eine optionale WebSocket-Signaling-Datei `signaling-server.js` ist enthalten und kann mit `npm run signaling` gestartet werden.
+Diese Anwendung nutzt **PeerJS** mit dem kostenlosen **PeerJS Cloud Signaling** (`0.peerjs.com`):
+1. **Client (Smartphone)**:
+   * Erfragt Kamera- und Mikrofonzugriff (`navigator.mediaDevices.getUserMedia`).
+   * Verbindet sich mit PeerJS Cloud unter der ID `sms-client-${sessionId}`.
+   * Ruft automatisch den Admin-Peer (`sms-admin-${sessionId}`) mit Audio- und Videodaten an.
+   * Bietet interaktive Bedienelemente: **Mikrofon stummschalten**, **Kamera stummschalten** und **Kamera wechseln (Front/Rückseite)**.
+2. **Admin-Dashboard**:
+   * Wartet unter `sms-admin-${sessionId}` auf eingehende Anrufe (`peer.on('call')`).
+   * Beantwortet den Anruf ohne lokalen Medien-Rückkanal (`call.answer()`) und bindet den eingehenden Stream direkt in das `<video>`-Element ein.
+   * Ermöglicht Vollbild, Ton-Aktivierung und Sitzungsbeendigung.
+3. **NAT- & Firewall-Traversal (STUN/ICE)**:
+   * Öffentliche Google STUN-Server (`stun:stun.l.google.com:19302`) sind in der Peer-Konfiguration hinterlegt, um NAT-Traversal über Mobilfunknetze (4G/5G) und unterschiedliche WLANs zu garantieren.
+   * Optional können zusätzliche TURN-Server über Umgebungsvariablen (`NEXT_PUBLIC_TURN_SERVER`, etc.) konfiguriert werden.
 
 ---
 

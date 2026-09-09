@@ -30,8 +30,14 @@ export default function HomePage() {
     localStream,
     connectionState,
     errorMessage: cameraError,
+    isAudioMuted,
+    isVideoMuted,
+    facingMode,
     startStream,
     stopStream,
+    toggleAudioMute,
+    toggleVideoMute,
+    flipCamera,
   } = useWebRTCClient({
     sessionId,
     onSessionEnded: handleSessionEnded,
@@ -176,6 +182,12 @@ export default function HomePage() {
             stream={localStream}
             connectionState={connectionState}
             onStop={handleStopCamera}
+            isAudioMuted={isAudioMuted}
+            isVideoMuted={isVideoMuted}
+            onToggleAudioMute={toggleAudioMute}
+            onToggleVideoMute={toggleVideoMute}
+            onFlipCamera={flipCamera}
+            facingMode={facingMode}
           />
         )}
 

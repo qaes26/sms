@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SessionStore } from '@/lib/database/session-store';
-import { SignalingBus } from '@/lib/webrtc/signaling-bus';
 
 interface Params {
   params: {
@@ -53,9 +52,5 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 export async function DELETE(req: NextRequest, { params }: Params) {
   const ended = await SessionStore.end(params.id);
-  // Also send termination signal to any active listeners
-  await SignalingBus.send(params.id, 'client', 'session-ended', { sessionId: params.id });
-  await SignalingBus.clear(params.id);
-
   return NextResponse.json({ success: ended });
 }

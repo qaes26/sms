@@ -89,72 +89,29 @@ async function runTests() {
   assert(/\+\d+ \d+ \*{4} \d{4}/.test(ourSession.maskedPhoneNumber), 'Phone number must match masked pattern');
   console.log(`✅ Found session in Admin dashboard. Masked phone: ${ourSession.maskedPhoneNumber}`);
 
-  // 8. Test WebRTC Signaling Exchange
-  console.log('\n8. Testing WebRTC Signaling offer / answer polling...');
-  // Client posts SDP offer
-  const offerRes = await fetch(`${BASE_URL}/api/signaling`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId,
-      sender: 'client',
-      type: 'offer',
-      payload: {
-        type: 'offer',
-        sdp: 'v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n'
-      }
-    })
-  });
-  assert.strictEqual(offerRes.status, 200, 'Client offer should succeed');
-
-  // Admin checks for offers
-  const pollForAdminRes = await fetch(`${BASE_URL}/api/signaling?sessionId=${sessionId}&role=admin`, {
-    headers: { Cookie: adminCookie }
-  });
-  assert.strictEqual(pollForAdminRes.status, 200, 'Admin polling should return 200');
-  const adminMessages = await pollForAdminRes.json();
-  assert(adminMessages.messages.some(m => m.type === 'offer'), 'Admin must receive the client SDP offer');
-  console.log('✅ Admin received SDP offer.');
-
-  // Admin posts SDP answer
-  const answerRes = await fetch(`${BASE_URL}/api/signaling`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
-    body: JSON.stringify({
-      sessionId,
-      sender: 'admin',
-      type: 'answer',
-      payload: {
-        type: 'answer',
-        sdp: 'v=0\r\no=- 54321 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n'
-      }
-    })
-  });
-  assert.strictEqual(answerRes.status, 200, 'Admin answer should succeed');
-
-  // Client polls for answer
-  const pollForClientRes = await fetch(`${BASE_URL}/api/signaling?sessionId=${sessionId}&role=client`);
-  assert.strictEqual(pollForClientRes.status, 200, 'Client polling should return 200');
-  const clientMessages = await pollForClientRes.json();
-  assert(clientMessages.messages.some(m => m.type === 'answer'), 'Client must receive the admin SDP answer');
-  console.log('✅ Client received SDP answer via serverless signaling.');
-
-  // 9. Test Heartbeat & Session termination
-  console.log('\n9. Testing Heartbeat and session termination...');
-  const heartbeatRes = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
+  // 8. Test Session Stream Status Update & Heartbeat
+  console.log('\n8. Testing Session Stream Status update & Heartbeat...');
+  const streamStatusRes = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ streamStatus: 'live' })
+    body: JSON.stringify({ streamStatus: 'streaming', heartbeat: true })
   });
-  assert.strictEqual(heartbeatRes.status, 200, 'Heartbeat PATCH should succeed');
+  assert.strictEqual(streamStatusRes.status, 200, 'Stream status PATCH should return 200');
 
-  // End session
+  const sessionDetailRes = await fetch(`${BASE_URL}/api/sessions/${sessionId}`);
+  assert.strictEqual(sessionDetailRes.status, 200, 'Session detail GET should return 200');
+  const sessionDetailJson = await sessionDetailRes.json();
+  assert.strictEqual(sessionDetailJson.streamStatus, 'streaming', 'Session streamStatus should be updated to streaming');
+  console.log('✅ Session stream status updated to streaming and verified.');
+
+  // 9. Test Session Termination
+  console.log('\n9. Testing Session termination...');
   const endRes = await fetch(`${BASE_URL}/api/sessions/${sessionId}`, {
     method: 'DELETE'
   });
   assert.strictEqual(endRes.status, 200, 'Session termination should succeed');
 
-  // Verify session is no longer active
+  // Verify session is no longer in active list
   const sessionsAfterRes = await fetch(`${BASE_URL}/api/sessions`, {
     headers: { Cookie: adminCookie }
   });
