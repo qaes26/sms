@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaConnection } from 'peerjs';
-import { getPeerJSOptions, getAdminPeerId, getClientPeerId } from '@/lib/webrtc/peer-config';
+import {
+  getPeerJSOptions,
+  getPeerJSOptionsAsync,
+  getAdminPeerId,
+  getClientPeerId,
+} from '@/lib/webrtc/peer-config';
 
 interface UseWebRTCClientProps {
   sessionId: string | null;
@@ -286,7 +291,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
 
       const clientPeerId = getClientPeerId(activeSessionId);
       const adminPeerId = getAdminPeerId(activeSessionId);
-      const peerOptions = getPeerJSOptions();
+      const peerOptions = await getPeerJSOptionsAsync();
 
       console.log(`[WebRTC Client] Connecting PeerJS Cloud with ID: ${clientPeerId}`);
       const peer = new Peer(clientPeerId, peerOptions);

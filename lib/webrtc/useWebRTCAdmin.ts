@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { MediaConnection } from 'peerjs';
-import { getPeerJSOptions, getAdminPeerId } from '@/lib/webrtc/peer-config';
+import {
+  getPeerJSOptions,
+  getPeerJSOptionsAsync,
+  getAdminPeerId,
+} from '@/lib/webrtc/peer-config';
 
 interface UseWebRTCAdminProps {
   sessionId: string | null;
@@ -86,7 +90,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
     try {
       const { default: Peer } = await import('peerjs');
-      const peerOptions = getPeerJSOptions();
+      const peerOptions = await getPeerJSOptionsAsync();
 
       console.log(`[WebRTC Admin] Initializing Peer with ID: ${peerId}`);
       const peer = new Peer(peerId, peerOptions);
