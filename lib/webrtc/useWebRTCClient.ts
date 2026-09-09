@@ -19,20 +19,74 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [peerId, setPeerId] = useState<string | null>(null);
 
+  // Rule 2: Store Peer instance and MediaStream inside useRef (instead of useState)
+  // to prevent connection destruction when component re-renders.
   const peerRef = useRef<any>(null);
   const callRef = useRef<MediaConnection | null>(null);
-  const hasCalledRef = useRef<boolean>(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const facingModeRef = useRef<'user' | 'environment'>('user');
   const isTerminatedRef = useRef<boolean>(false);
   const isConnectedRef = useRef<boolean>(false);
   const retryCallTimerRef = useRef<NodeJS.Timeout | null>(null);
   const heartbeatTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const wakeLockRef = useRef<any>(null);
 
-  // Stop all camera/microphone tracks and WebRTC PeerJS connections
+  // Rule 2: Use a useRef(false) flag to guarantee peer.call() is executed exactly once without infinite loops
+  const hasCalledRef = useRef<boolean>(false);
+
+  const sessionIdRef = useRef<string | null>(sessionId);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // Rule 4: Prevent Screen Sleep (Wake Lock API)
+  const requestWakeLock = useCallback(async () => {
+    try {
+      if (typeof window !== 'undefined' && 'wakeLock' in navigator) {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        console.log('[WakeLock] Screen wake lock acquired');
+        wakeLockRef.current.addEventListener('release', () => {
+          console.log('[WakeLock] Screen wake lock was released');
+        });
+      }
+    } catch (err) {
+      console.warn('[WakeLock] Screen wake lock request failed or unsupported:', err);
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    try {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('[WakeLock] Screen wake lock released');
+      }
+    } catch (err) {
+      console.warn('[WakeLock] Error releasing screen wake lock:', err);
+    }
+  }, []);
+
+  // Re-acquire wake lock if mobile user minimizes and reopens the browser tab
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === 'visible' && localStreamRef.current && isStreaming) {
+        await requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [isStreaming, requestWakeLock]);
+
+  // Stop all camera/microphone tracks and WebRTC connections
   const stopStream = useCallback(async () => {
     isTerminatedRef.current = true;
     isConnectedRef.current = false;
+    hasCalledRef.current = false;
+
+    // Release Screen Wake Lock
+    await releaseWakeLock();
 
     if (retryCallTimerRef.current) {
       clearInterval(retryCallTimerRef.current);
@@ -44,7 +98,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       heartbeatTimerRef.current = null;
     }
 
-    // Close PeerJS active media call
+    // Close active media call
     if (callRef.current) {
       try {
         callRef.current.close();
@@ -54,7 +108,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       callRef.current = null;
     }
 
-    // Destroy Peer instance
+    // Destroy Peer instance on explicit user stop
     if (peerRef.current) {
       try {
         peerRef.current.destroy();
@@ -81,9 +135,10 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
     setConnectionState('stopped');
 
     // Notify backend that session is ended
-    if (sessionId) {
+    const activeId = sessionIdRef.current || sessionId;
+    if (activeId) {
       try {
-        await fetch(`/api/sessions/${sessionId}`, {
+        await fetch(`/api/sessions/${activeId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ streamStatus: 'stopped', status: 'ended' }),
@@ -91,31 +146,33 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       } catch (_) {}
 
       try {
-        await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+        await fetch(`/api/sessions/${activeId}`, { method: 'DELETE' });
       } catch (_) {}
     }
 
     if (onSessionEnded) {
       onSessionEnded();
     }
-  }, [sessionId, onSessionEnded]);
+  }, [sessionId, onSessionEnded, releaseWakeLock]);
 
   // Handle page leave / tab close
   useEffect(() => {
     const handleBeforeUnload = () => {
-      if (sessionId && isStreaming) {
-        navigator.sendBeacon(`/api/sessions/${sessionId}`);
+      const activeId = sessionIdRef.current || sessionId;
+      if (activeId && isStreaming) {
+        navigator.sendBeacon(`/api/sessions/${activeId}`);
       }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
       }
+      releaseWakeLock();
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [sessionId, isStreaming]);
+  }, [sessionId, isStreaming, releaseWakeLock]);
 
   // Toggle Microphone mute
   const toggleAudioMute = useCallback(() => {
@@ -190,17 +247,20 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
   }, [isVideoMuted]);
 
   // Request camera and microphone access, initialize PeerJS and call Admin
-  const startStream = useCallback(async () => {
-    if (!sessionId) {
+  const startStream = useCallback(async (overrideSessionId?: string) => {
+    const activeSessionId = overrideSessionId || sessionIdRef.current || sessionId;
+    if (!activeSessionId) {
       setErrorMessage('Keine gültige Sitzung gefunden.');
       return false;
     }
+    sessionIdRef.current = activeSessionId;
 
     try {
       setErrorMessage(null);
       setConnectionState('requesting-permission');
       isTerminatedRef.current = false;
       isConnectedRef.current = false;
+      hasCalledRef.current = false;
 
       // 1. Request user media (audio + video with mobile-friendly constraints)
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -212,25 +272,35 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         audio: true,
       });
 
+      // Store in ref to protect against re-renders
       localStreamRef.current = stream;
       setLocalStream(stream);
       setIsStreaming(true);
       setConnectionState('connecting');
 
+      // Rule 4: Prevent Screen Sleep (Wake Lock API)
+      await requestWakeLock();
+
       // 2. Dynamically import PeerJS (safe against SSR in Next.js)
       const { default: Peer } = await import('peerjs');
 
-      const clientPeerId = getClientPeerId(sessionId);
-      const adminPeerId = getAdminPeerId(sessionId);
+      const clientPeerId = getClientPeerId(activeSessionId);
+      const adminPeerId = getAdminPeerId(activeSessionId);
       const peerOptions = getPeerJSOptions();
 
       console.log(`[WebRTC Client] Connecting PeerJS Cloud with ID: ${clientPeerId}`);
       const peer = new Peer(clientPeerId, peerOptions);
       peerRef.current = peer;
 
-      // Function to initiate or retry calling Admin
+      // Function to initiate calling Admin (Protected with hasCalledRef to execute exactly once)
       const makeCall = () => {
-        if (hasCalledRef.current || isTerminatedRef.current || isConnectedRef.current || !peerRef.current || peer.destroyed) {
+        if (
+          hasCalledRef.current ||
+          isTerminatedRef.current ||
+          isConnectedRef.current ||
+          !peerRef.current ||
+          peer.destroyed
+        ) {
           return;
         }
 
@@ -242,13 +312,14 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
           callRef.current = null;
         }
 
+        // Guarantee peer.call() is executed exactly once
         hasCalledRef.current = true;
         console.log(`[WebRTC Client] Calling Admin peer: ${adminPeerId}`);
         const call = peer.call(adminPeerId, stream);
         if (!call) return;
         callRef.current = call;
 
-        // Monitor the underlying RTCPeerConnection for connection state
+        // Monitor underlying RTCPeerConnection for connection state
         if (call.peerConnection) {
           call.peerConnection.onconnectionstatechange = () => {
             const state = call.peerConnection.connectionState;
@@ -262,8 +333,10 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
               }
             } else if (state === 'disconnected') {
               setConnectionState('disconnected');
+              hasCalledRef.current = false;
             } else if (state === 'failed') {
               setConnectionState('failed');
+              hasCalledRef.current = false;
             }
           };
 
@@ -277,19 +350,25 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
                 clearInterval(retryCallTimerRef.current);
                 retryCallTimerRef.current = null;
               }
+            } else if (ice === 'disconnected' || ice === 'failed') {
+              hasCalledRef.current = false;
             }
           };
         }
 
         call.on('close', () => {
           console.log('[WebRTC Client] MediaConnection closed');
+          hasCalledRef.current = false;
+          isConnectedRef.current = false;
           if (!isTerminatedRef.current) {
-            setConnectionState('disconnected');
+            setConnectionState('waiting-admin');
           }
         });
 
         call.on('error', (err) => {
           console.warn('[WebRTC Client] MediaConnection error:', err);
+          hasCalledRef.current = false;
+          isConnectedRef.current = false;
         });
       };
 
@@ -298,16 +377,17 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         setPeerId(id);
         setConnectionState('waiting-admin');
 
-        // Immediately attempt initial call
+        // Initial call attempt
         makeCall();
 
-        // Retry calling if admin dashboard opens a few seconds later
+        // Retry calling if Admin connects slightly later
         if (retryCallTimerRef.current) {
           clearInterval(retryCallTimerRef.current);
         }
         retryCallTimerRef.current = setInterval(() => {
           if (!isConnectedRef.current && !isTerminatedRef.current) {
-            console.log('[WebRTC Client] Retrying call to Admin...');
+            console.log('[WebRTC Client] Retrying call to Admin...', adminPeerId);
+            hasCalledRef.current = false;
             makeCall();
           } else if (retryCallTimerRef.current) {
             clearInterval(retryCallTimerRef.current);
@@ -316,29 +396,37 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         }, 2500);
       });
 
+      // Rule 5: Error handling & graceful state updates
       peer.on('error', (err: any) => {
         console.warn('[WebRTC Client] Peer error:', err?.type, err?.message);
         if (err?.type === 'peer-unavailable') {
-          // Admin peer is not yet connected to PeerJS Cloud.
-          // Keep state at waiting-admin and let the retry interval call again.
+          // Admin peer is not yet connected to PeerJS Cloud
+          hasCalledRef.current = false;
+          if (callRef.current) {
+            try {
+              callRef.current.close();
+            } catch (_) {}
+            callRef.current = null;
+          }
           setConnectionState('waiting-admin');
         } else if (err?.type === 'unavailable-id') {
-          // ID already registered, recreate
           console.warn('[WebRTC Client] Client Peer ID unavailable');
         } else {
           setErrorMessage('Verbindungsfehler: ' + (err?.message || 'Signalfehler'));
+          setConnectionState('error');
         }
       });
 
       peer.on('disconnected', () => {
-        console.log('[WebRTC Client] PeerJS disconnected from signaling server. Reconnecting...');
+        console.log('[WebRTC Client] PeerJS disconnected from signaling server.');
+        setConnectionState('disconnected');
         if (!isTerminatedRef.current && peerRef.current && !peer.destroyed) {
           peer.reconnect();
         }
       });
 
       peer.on('close', () => {
-        console.log('[WebRTC Client] Peer destroyed');
+        console.log('[WebRTC Client] Peer closed');
         if (!isTerminatedRef.current) {
           setConnectionState('disconnected');
         }
@@ -346,17 +434,17 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
 
       // 3. Inform backend that streaming has started
       try {
-        await fetch(`/api/sessions/${sessionId}`, {
+        await fetch(`/api/sessions/${activeSessionId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ streamStatus: 'streaming', heartbeat: true }),
         });
       } catch (_) {}
 
-      // 4. Start periodic heartbeat to keep session active in backend
+      // 4. Start periodic heartbeat
       heartbeatTimerRef.current = setInterval(() => {
-        if (!isTerminatedRef.current && sessionId) {
-          fetch(`/api/sessions/${sessionId}`, {
+        if (!isTerminatedRef.current && sessionIdRef.current) {
+          fetch(`/api/sessions/${sessionIdRef.current}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ heartbeat: true }),
@@ -367,6 +455,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       return true;
     } catch (err: any) {
       console.error('[WebRTC Client Error]', err);
+      await releaseWakeLock();
       if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
         setErrorMessage(
           'Der Zugriff auf Kamera und Mikrofon wurde abgelehnt. Bitte erlauben Sie den Zugriff in Ihren Browsereinstellungen, um fortzufahren.'
@@ -385,11 +474,12 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
       setConnectionState('error');
       return false;
     }
-  }, [sessionId]);
+  }, [sessionId, requestWakeLock, releaseWakeLock]);
 
-  // Cleanup on unmount
+  // Rule 2: Cleanup ONLY on actual unmount (empty dependency array [])
   useEffect(() => {
     return () => {
+      releaseWakeLock();
       if (retryCallTimerRef.current) {
         clearInterval(retryCallTimerRef.current);
       }
@@ -405,12 +495,14 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
         try {
           peerRef.current.destroy();
         } catch (_) {}
+        peerRef.current = null;
       }
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
+        localStreamRef.current = null;
       }
     };
-  }, []);
+  }, [releaseWakeLock]);
 
   return {
     localStream,

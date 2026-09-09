@@ -29,3 +29,28 @@ export async function GET(req: NextRequest) {
     count: activeSessions.length,
   });
 }
+
+export async function POST(req: NextRequest) {
+  const auth = await verifyAdminSession();
+  if (!auth) {
+    return NextResponse.json(
+      { error: 'Nicht autorisiert.' },
+      { status: 401 }
+    );
+  }
+
+  const session = await SessionStore.create('+49 Direct Link', 'Direkter Link');
+
+  return NextResponse.json({
+    success: true,
+    sessionId: session.id,
+    session: {
+      id: session.id,
+      maskedPhoneNumber: session.maskedPhoneNumber,
+      createdAt: session.createdAt,
+      status: session.status,
+      streamStatus: session.streamStatus,
+    },
+  });
+}
+

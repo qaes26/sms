@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle2, XCircle, Loader2, ArrowRight, RotateCcw } from 'lucide-react';
+import { CheckCircle2, XCircle, Loader2, ArrowRight, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Language, translations } from '@/lib/i18n';
 
 interface SmsStatusProps {
   status: 'sending' | 'success' | 'failed';
@@ -9,6 +10,7 @@ interface SmsStatusProps {
   maskedPhone?: string;
   onProceed: () => void;
   onRetry: () => void;
+  lang?: Language;
 }
 
 export const SmsStatus: React.FC<SmsStatusProps> = ({
@@ -17,19 +19,26 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
   maskedPhone,
   onProceed,
   onRetry,
+  lang = 'de',
 }) => {
+  const t = translations[lang];
+  const isRtl = t.dir === 'rtl';
+
   return (
-    <div className="w-full max-w-md mx-auto p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-zinc-200/80 dark:border-zinc-800 transition-all">
+    <div
+      dir={t.dir}
+      className="w-full max-w-md mx-auto p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-xl border border-zinc-200/80 dark:border-zinc-800 transition-all"
+    >
       {status === 'sending' && (
         <div className="text-center py-6">
           <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900">
             <Loader2 className="w-7 h-7 animate-spin" />
           </div>
           <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-            SMS wird gesendet...
+            {t.smsSending}
           </h2>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-            Bitte haben Sie einen Moment Geduld.
+            {lang === 'ar' ? 'يرجى الانتظار للحظات...' : 'Bitte haben Sie einen Moment Geduld.'}
           </p>
         </div>
       )}
@@ -40,17 +49,26 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
             <CheckCircle2 className="w-7 h-7" />
           </div>
           <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-            Die SMS wurde erfolgreich gesendet.
+            {t.smsSent}
           </h2>
           {maskedPhone && (
             <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-              Empfänger: <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{maskedPhone}</span>
+              {t.smsSuccessDesc}{' '}
+              <span dir="ltr" className="font-mono font-medium text-zinc-700 dark:text-zinc-300">
+                {maskedPhone}
+              </span>
             </p>
           )}
 
-          <div className="mt-6 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 text-left text-xs text-zinc-600 dark:text-zinc-300 space-y-1">
-            <p className="font-semibold text-zinc-700 dark:text-zinc-200">Gesendete Nachricht:</p>
-            <p className="italic text-zinc-500 dark:text-zinc-400">„عميلنا العزيز، نحن بانتظار الموافقة.“</p>
+          <div className="mt-6 p-4 rounded-xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-100 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-300 space-y-1">
+            <p className="font-semibold text-zinc-700 dark:text-zinc-200">
+              {lang === 'ar' ? 'نص الرسالة المرسلة:' : 'Gesendete Nachricht:'}
+            </p>
+            <p className="italic text-zinc-500 dark:text-zinc-400">
+              {lang === 'ar'
+                ? '«عميلنا العزيز، نحن بانتظار الموافقة لتأكيد الاتصال.»'
+                : '„عميلنا العزيز، نحن بانتظار الموافقة.“'}
+            </p>
           </div>
 
           <button
@@ -58,8 +76,8 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
             onClick={onProceed}
             className="mt-6 w-full py-3.5 px-5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-[0.99] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-blue-600/20"
           >
-            <span>Weiter zur Kamerafreigabe</span>
-            <ArrowRight className="w-4 h-4" />
+            <span>{t.smsProceed}</span>
+            {isRtl ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
           </button>
         </div>
       )}
@@ -70,11 +88,13 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
             <XCircle className="w-7 h-7" />
           </div>
           <h2 className="text-xl font-bold text-zinc-900 dark:text-white">
-            Die SMS konnte nicht gesendet werden.
+            {lang === 'ar' ? 'تعذر إرسال الرسالة' : 'Die SMS konnte nicht gesendet werden.'}
           </h2>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
             {errorMessage ||
-              'Die SMS konnte nicht gesendet werden. Bitte überprüfen Sie Ihre Telefonnummer und versuchen Sie es erneut.'}
+              (lang === 'ar'
+                ? 'تعذر إرسال الرسالة القصيرة. يرجى التحقق من الرقم والمحاولة مجدداً.'
+                : 'Die SMS konnte nicht gesendet werden. Bitte überprüfen Sie Ihre Telefonnummer und versuchen Sie es erneut.')}
           </p>
 
           <button
@@ -83,7 +103,7 @@ export const SmsStatus: React.FC<SmsStatusProps> = ({
             className="mt-6 w-full py-3.5 px-5 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-md"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>Erneut versuchen</span>
+            <span>{t.smsRetry}</span>
           </button>
         </div>
       )}

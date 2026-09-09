@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   Volume2,
   VolumeX,
+  Copy,
+  Check,
+  Globe,
 } from 'lucide-react';
 
 interface LiveStreamCardProps {
@@ -27,6 +30,8 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isMuted, setIsMuted] = useState<boolean>(true);
+  const [isCopied, setIsCopied] = useState<boolean>(false);
+  const [isCopiedAr, setIsCopiedAr] = useState<boolean>(false);
 
   const { remoteStream, connectionState, error, reconnect } = useWebRTCAdmin({
     sessionId: session.id,
@@ -79,6 +84,54 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
     }
   };
 
+  const handleCopyClientLink = async () => {
+    if (typeof window === 'undefined') return;
+    const clientUrl = `${window.location.origin}/?sessionId=${session.id}`;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(clientUrl);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = clientUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2500);
+    } catch (err) {
+      console.warn('Failed to copy client link', err);
+    }
+  };
+
+  const handleCopyArabicLink = async () => {
+    if (typeof window === 'undefined') return;
+    const clientUrl = `${window.location.origin}/?sessionId=${session.id}&lang=ar`;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(clientUrl);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = clientUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setIsCopiedAr(true);
+      setTimeout(() => setIsCopiedAr(false), 2500);
+    } catch (err) {
+      console.warn('Failed to copy arabic link', err);
+    }
+  };
+
   const formattedStartTime = new Date(session.createdAt).toLocaleTimeString('de-DE', {
     hour: '2-digit',
     minute: '2-digit',
@@ -89,11 +142,60 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
     <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col">
       {/* Header */}
       <div className="p-4 bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200">
               ID: {session.id.substring(0, 8)}...
             </span>
+
+            {/* زر نسخ رابط العميل */}
+            <button
+              type="button"
+              onClick={handleCopyClientLink}
+              title={`نسخ رابط العميل: ${typeof window !== 'undefined' ? window.location.origin : ''}/?sessionId=${session.id}`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all shadow-sm ${
+                isCopied
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60 dark:border-blue-800'
+              }`}
+            >
+              {isCopied ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">تم النسخ!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>نسخ رابط العميل</span>
+                </>
+              )}
+            </button>
+
+            {/* زر مخصص للغة العربية */}
+            <button
+              type="button"
+              onClick={handleCopyArabicLink}
+              title={`نسخ رابط العميل باللغة العربية: ${typeof window !== 'undefined' ? window.location.origin : ''}/?sessionId=${session.id}&lang=ar`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border transition-all shadow-sm ${
+                isCopiedAr
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900/60 dark:border-emerald-800'
+              }`}
+            >
+              {isCopiedAr ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-semibold text-emerald-700 dark:text-emerald-300">تم النسخ (عربي)!</span>
+                </>
+              ) : (
+                <>
+                  <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>نسخ رابط عربي 🇸🇦</span>
+                </>
+              )}
+            </button>
+
             <ConnectionStatus
               status={remoteStream ? 'connected' : connectionState}
               isLive={!!remoteStream && connectionState === 'connected'}

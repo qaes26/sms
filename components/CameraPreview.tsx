@@ -8,6 +8,7 @@ import {
   Smile,
   Sparkles,
 } from 'lucide-react';
+import { Language, translations } from '@/lib/i18n';
 
 interface CameraPreviewProps {
   stream: MediaStream | null;
@@ -19,14 +20,17 @@ interface CameraPreviewProps {
   onToggleVideoMute?: () => void;
   onFlipCamera?: () => void;
   facingMode?: 'user' | 'environment';
+  lang?: Language;
 }
 
 export const CameraPreview: React.FC<CameraPreviewProps> = ({
   stream,
   connectionState,
   onStop,
+  lang = 'de',
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const t = translations[lang];
 
   const setVideoRef = useCallback(
     (el: HTMLVideoElement | null) => {
@@ -50,23 +54,26 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   const getConnectionLabel = () => {
     switch (connectionState) {
       case 'connected':
-        return 'Verbunden (Live)';
+        return t.connConnected;
       case 'waiting-admin':
-        return 'Warten auf Verbindung...';
+        return t.connWaitingAdmin;
       case 'connecting':
-        return 'Verbindung aufbauen...';
+        return t.connConnecting;
       case 'disconnected':
-        return 'Verbindung getrennt';
+        return t.connDisconnected;
       case 'failed':
-        return 'Verbindungsfehler';
+        return t.connFailed;
       default:
-        return 'Wird initialisiert...';
+        return t.connInitializing;
     }
   };
 
   return (
-    <div className="w-full max-w-md mx-auto p-5 sm:p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800 transition-all">
-      {/* Hidden video element keeping media stream active in background */}
+    <div
+      dir={t.dir}
+      className="w-full max-w-md mx-auto p-5 sm:p-6 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-zinc-200/80 dark:border-zinc-800 transition-all"
+    >
+      {/* Rule 3: Hidden video element keeping media stream active in background with required iOS/Safari flags */}
       <video
         ref={setVideoRef}
         autoPlay
@@ -92,7 +99,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
             />
           </span>
           <h2 className="font-bold text-base text-zinc-900 dark:text-white">
-            Verifizierung aktiv
+            {t.verificationActive}
           </h2>
         </div>
 
@@ -105,7 +112,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
           }`}
         >
           <Radio className={`w-3.5 h-3.5 ${connectionState === 'connected' ? 'animate-pulse' : ''}`} />
-          <span>{connectionState === 'connected' ? 'Live' : 'Bereit'}</span>
+          <span>{connectionState === 'connected' ? t.live : t.ready}</span>
         </div>
       </div>
 
@@ -148,7 +155,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
       <div className="mt-4 p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 flex items-start gap-3">
         <ShieldCheck className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
         <p className="text-sm font-medium text-blue-900 dark:text-blue-200 leading-normal">
-          Ihre Verifizierung wird gerade sicher durchgeführt.
+          {t.verificationInProgress}
         </p>
       </div>
 
@@ -159,7 +166,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         className="mt-5 w-full py-3.5 px-5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-md shadow-red-600/20"
       >
         <PhoneOff className="w-4 h-4" />
-        <span>Kamerafreigabe beenden</span>
+        <span>{t.stopCamera}</span>
       </button>
     </div>
   );

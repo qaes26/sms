@@ -15,9 +15,13 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   const [error, setError] = useState<string | null>(null);
   const [adminPeerId, setAdminPeerId] = useState<string | null>(null);
 
+  // Rule 2: Store Peer, Stream, and Active Call in useRef (instead of useState)
+  // to prevent connection destruction when component re-renders.
   const peerRef = useRef<any>(null);
-  const callRef = useRef<MediaConnection | null>(null);
-  const isCleanedUpRef = useRef<boolean>(false);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const activeCallRef = useRef<MediaConnection | null>(null);
+
+  const isUnmountedRef = useRef<boolean>(false);
   const activeSessionIdRef = useRef<string | null>(null);
   const onSessionTerminatedRef = useRef(onSessionTerminated);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -27,37 +31,26 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     onSessionTerminatedRef.current = onSessionTerminated;
   }, [onSessionTerminated]);
 
-  const cleanup = useCallback(() => {
-    isCleanedUpRef.current = true;
-
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = null;
-    }
-
-    if (callRef.current) {
+  // Disconnect ongoing call without destroying the Peer instance
+  const disconnectCall = useCallback(() => {
+    if (activeCallRef.current) {
       try {
-        callRef.current.close();
-      } catch (_) {}
-      callRef.current = null;
+        activeCallRef.current.close();
+      } catch (e) {
+        console.warn('[WebRTC Admin] Error closing call:', e);
+      }
+      activeCallRef.current = null;
     }
 
-    // Removed peer.destroy() from normal state cleanup
-
+    remoteStreamRef.current = null;
     setRemoteStream(null);
     setConnectionState('disconnected');
     setError(null);
-    retryCountRef.current = 0;
   }, []);
 
   const connectAdminPeer = useCallback(async () => {
     if (!sessionId) {
       setConnectionState('idle');
-      return;
-    }
-
-    if (peerRef.current) {
-      console.log('[WebRTC Admin] Peer already initialized. Skipping re-init.');
       return;
     }
 
@@ -67,16 +60,31 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       reconnectTimeoutRef.current = null;
     }
 
-    isCleanedUpRef.current = false;
-    activeSessionIdRef.current = sessionId;
-    setError(null);
-
     const peerId = getAdminPeerId(sessionId);
 
+    // If already connected to the same peer ID, don't recreate
+    if (peerRef.current && !peerRef.current.destroyed && activeSessionIdRef.current === sessionId) {
+      console.log(`[WebRTC Admin] Peer already active for ID: ${peerId}`);
+      return;
+    }
+
+    // If switching to another session ID, close previous call and peer first
+    if (peerRef.current && activeSessionIdRef.current !== sessionId) {
+      try {
+        if (activeCallRef.current) {
+          activeCallRef.current.close();
+          activeCallRef.current = null;
+        }
+        peerRef.current.destroy();
+      } catch (_) {}
+      peerRef.current = null;
+    }
+
+    activeSessionIdRef.current = sessionId;
+    setError(null);
     setConnectionState('connecting');
 
     try {
-      // Dynamic import of PeerJS for SSR safety
       const { default: Peer } = await import('peerjs');
       const peerOptions = getPeerJSOptions();
 
@@ -85,89 +93,87 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       peerRef.current = peer;
 
       peer.on('open', (id) => {
+        if (isUnmountedRef.current) return;
         console.log('[WebRTC Admin] Peer connected with ID:', id);
         setAdminPeerId(id);
         setConnectionState('waiting-for-call');
-        retryCountRef.current = 0; // Reset retry counter on successful open
+        retryCountRef.current = 0;
       });
 
+      // Rule 5: If an incoming call arrives and there is an existing active call,
+      // gracefully close the old one and accept the new one without crashing the UI.
       peer.on('call', (incomingCall: MediaConnection) => {
+        if (isUnmountedRef.current) return;
         console.log('[WebRTC Admin] Incoming call received from:', incomingCall.peer);
 
-        // Close any lingering previous call
-        if (callRef.current && callRef.current !== incomingCall) {
+        if (activeCallRef.current) {
+          console.log('[WebRTC Admin] Gracefully closing existing active call');
           try {
-            callRef.current.close();
-          } catch (_) {}
+            activeCallRef.current.close();
+          } catch (err) {
+            console.warn('[WebRTC Admin] Error closing old call:', err);
+          }
+          activeCallRef.current = null;
         }
-        
-        callRef.current = incomingCall;
+
+        activeCallRef.current = incomingCall;
         setConnectionState('call-received');
 
-        // Answer the call without sending any local media stream
+        // Answer without sending local stream
         incomingCall.answer();
 
-        // Attach remote MediaStream
+        // Attach incoming stream to ref and state
         incomingCall.on('stream', (stream: MediaStream) => {
+          if (isUnmountedRef.current) return;
           console.log('[WebRTC Admin] Remote MediaStream attached with tracks:', stream.getTracks().length);
+          remoteStreamRef.current = stream;
           setRemoteStream(stream);
           setConnectionState('connected');
+          setError(null);
         });
-
-        // Monitor underlying RTCPeerConnection for connection events
-        if (incomingCall.peerConnection) {
-          incomingCall.peerConnection.onconnectionstatechange = () => {
-            const pcState = incomingCall.peerConnection.connectionState;
-            console.log('[WebRTC Admin] PC connectionState:', pcState);
-            if (pcState === 'connected') {
-              setConnectionState('connected');
-            } else if (pcState === 'disconnected') {
-              setConnectionState('disconnected');
-            } else if (pcState === 'failed') {
-              setConnectionState('failed');
-              setError('Die Verbindung zum Smartphone ist fehlgeschlagen.');
-            }
-          };
-
-          incomingCall.peerConnection.oniceconnectionstatechange = () => {
-            const iceState = incomingCall.peerConnection.iceConnectionState;
-            console.log('[WebRTC Admin] PC iceConnectionState:', iceState);
-            if (iceState === 'connected' || iceState === 'completed') {
-              setConnectionState('connected');
-            } else if (iceState === 'failed') {
-              setConnectionState('failed');
-              setError('Verbindung über ICE fehlgeschlagen. Bitte überprüfen Sie Ihre Netzwerkeinstellungen.');
-            }
-          };
-        }
 
         incomingCall.on('close', () => {
           console.log('[WebRTC Admin] MediaConnection closed');
-          if (!isCleanedUpRef.current) {
-            setRemoteStream(null);
-            setConnectionState('waiting-for-call');
-            if (onSessionTerminatedRef.current) {
-              onSessionTerminatedRef.current();
+          if (activeCallRef.current === incomingCall) {
+            activeCallRef.current = null;
+            remoteStreamRef.current = null;
+            if (!isUnmountedRef.current) {
+              setRemoteStream(null);
+              setConnectionState('waiting-for-call');
+              if (onSessionTerminatedRef.current) {
+                onSessionTerminatedRef.current();
+              }
             }
           }
         });
 
         incomingCall.on('error', (err) => {
-          console.warn('[WebRTC Admin] Call error:', err);
+          console.warn('[WebRTC Admin] MediaConnection error:', err);
+          if (activeCallRef.current === incomingCall) {
+            activeCallRef.current = null;
+            remoteStreamRef.current = null;
+            if (!isUnmountedRef.current) {
+              setRemoteStream(null);
+              setConnectionState('failed');
+              setError('Verbindungsfehler während der Übertragung.');
+            }
+          }
         });
       });
 
+      // Rule 5: Error handling & graceful state updates
       peer.on('error', (err: any) => {
+        if (isUnmountedRef.current) return;
         console.warn('[WebRTC Admin] Peer error:', err?.type, err?.message);
+
         if (err?.type === 'unavailable-id') {
-          // Guard against infinite reconnect loop: max 3 retries with exponential backoff
           if (retryCountRef.current < 3) {
             retryCountRef.current += 1;
             const delay = retryCountRef.current * 2000;
             console.log(`[WebRTC Admin] Admin ID busy. Retry ${retryCountRef.current}/3 in ${delay}ms...`);
             if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = setTimeout(() => {
-              if (!isCleanedUpRef.current && sessionId === activeSessionIdRef.current) {
+              if (!isUnmountedRef.current && sessionId === activeSessionIdRef.current) {
                 connectAdminPeer();
               }
             }, delay);
@@ -181,45 +187,68 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
         }
       });
 
+      // Rule 5: Disconnection handling
       peer.on('disconnected', () => {
-        console.log('[WebRTC Admin] Disconnected from signaling. Reconnecting...');
-        if (!isCleanedUpRef.current && peerRef.current && !peer.destroyed) {
+        if (isUnmountedRef.current) return;
+        console.log('[WebRTC Admin] Disconnected from signaling server.');
+        setConnectionState('disconnected');
+        if (peerRef.current && !peer.destroyed) {
           peer.reconnect();
         }
       });
 
       peer.on('close', () => {
         console.log('[WebRTC Admin] Peer closed');
-        if (!isCleanedUpRef.current) {
+        if (!isUnmountedRef.current) {
           setConnectionState('disconnected');
         }
       });
     } catch (err: any) {
       console.error('[WebRTC Admin Init Error]', err);
-      setError('Fehler bei der Initialisierung von PeerJS.');
-      setConnectionState('error');
+      if (!isUnmountedRef.current) {
+        setError('Fehler bei der Initialisierung von PeerJS.');
+        setConnectionState('error');
+      }
     }
   }, [sessionId]);
 
+  // Connect whenever sessionId changes
   useEffect(() => {
-    if (sessionId === activeSessionIdRef.current) return;
+    isUnmountedRef.current = false;
     connectAdminPeer();
 
     return () => {
-      cleanup();
-      activeSessionIdRef.current = null;
+      // Rule 2: Do NOT destroy peer here just because of re-render.
+      // Simply close active call if sessionId changes.
+      if (activeCallRef.current) {
+        try {
+          activeCallRef.current.close();
+        } catch (_) {}
+        activeCallRef.current = null;
+      }
     };
-  }, [sessionId, connectAdminPeer, cleanup]);
+  }, [sessionId, connectAdminPeer]);
 
-  // Clean up peer only on final unmount
+  // Rule 2: Destroy Peer ONLY on actual component unmount
   useEffect(() => {
     return () => {
+      isUnmountedRef.current = true;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (activeCallRef.current) {
+        try {
+          activeCallRef.current.close();
+        } catch (_) {}
+        activeCallRef.current = null;
+      }
       if (peerRef.current) {
         try {
           peerRef.current.destroy();
         } catch (_) {}
         peerRef.current = null;
       }
+      remoteStreamRef.current = null;
     };
   }, []);
 
@@ -229,6 +258,6 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     error,
     adminPeerId,
     reconnect: connectAdminPeer,
-    disconnect: cleanup,
+    disconnect: disconnectCall,
   };
 }
