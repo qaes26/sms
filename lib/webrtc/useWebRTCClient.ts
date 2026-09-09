@@ -21,6 +21,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
 
   const peerRef = useRef<any>(null);
   const callRef = useRef<MediaConnection | null>(null);
+  const hasCalledRef = useRef<boolean>(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const facingModeRef = useRef<'user' | 'environment'>('user');
   const isTerminatedRef = useRef<boolean>(false);
@@ -229,7 +230,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
 
       // Function to initiate or retry calling Admin
       const makeCall = () => {
-        if (isTerminatedRef.current || isConnectedRef.current || !peerRef.current || peer.destroyed) {
+        if (hasCalledRef.current || isTerminatedRef.current || isConnectedRef.current || !peerRef.current || peer.destroyed) {
           return;
         }
 
@@ -241,6 +242,7 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
           callRef.current = null;
         }
 
+        hasCalledRef.current = true;
         console.log(`[WebRTC Client] Calling Admin peer: ${adminPeerId}`);
         const call = peer.call(adminPeerId, stream);
         if (!call) return;
