@@ -20,6 +20,8 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
   const isCleanedUpRef = useRef<boolean>(false);
   const activeSessionIdRef = useRef<string | null>(null);
   const onSessionTerminatedRef = useRef(onSessionTerminated);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryCountRef = useRef<number>(0);
 
   useEffect(() => {
     onSessionTerminatedRef.current = onSessionTerminated;
@@ -27,6 +29,11 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
   const cleanup = useCallback(() => {
     isCleanedUpRef.current = true;
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
 
     if (callRef.current) {
       try {
@@ -45,6 +52,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
     setRemoteStream(null);
     setConnectionState('disconnected');
     setError(null);
+    retryCountRef.current = 0;
   }, []);
 
   const connectAdminPeer = useCallback(async () => {
@@ -53,17 +61,45 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       return;
     }
 
-    cleanup();
+    // Cancel any pending reconnect timers
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+
     isCleanedUpRef.current = false;
     activeSessionIdRef.current = sessionId;
     setError(null);
+
+    const peerId = getAdminPeerId(sessionId);
+
+    // If existing Peer instance is already open with this ID, reuse it without destroying!
+    if (peerRef.current && !peerRef.current.destroyed && peerRef.current.id === peerId) {
+      console.log('[WebRTC Admin] Reusing existing open Peer connection for ID:', peerId);
+      if (callRef.current) {
+        try {
+          callRef.current.close();
+        } catch (_) {}
+        callRef.current = null;
+      }
+      setRemoteStream(null);
+      setConnectionState('waiting-for-call');
+      return;
+    }
+
+    // Otherwise clean up previous peer instance
+    if (peerRef.current) {
+      try {
+        peerRef.current.destroy();
+      } catch (_) {}
+      peerRef.current = null;
+    }
+
     setConnectionState('connecting');
 
     try {
       // Dynamic import of PeerJS for SSR safety
       const { default: Peer } = await import('peerjs');
-
-      const peerId = getAdminPeerId(sessionId);
       const peerOptions = getPeerJSOptions();
 
       console.log(`[WebRTC Admin] Initializing Peer with ID: ${peerId}`);
@@ -74,10 +110,18 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
         console.log('[WebRTC Admin] Peer connected with ID:', id);
         setAdminPeerId(id);
         setConnectionState('waiting-for-call');
+        retryCountRef.current = 0; // Reset retry counter on successful open
       });
 
       peer.on('call', (incomingCall: MediaConnection) => {
         console.log('[WebRTC Admin] Incoming call received from:', incomingCall.peer);
+
+        // Close any lingering previous call
+        if (callRef.current && callRef.current !== incomingCall) {
+          try {
+            callRef.current.close();
+          } catch (_) {}
+        }
         callRef.current = incomingCall;
         setConnectionState('call-received');
 
@@ -122,7 +166,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
           console.log('[WebRTC Admin] MediaConnection closed');
           if (!isCleanedUpRef.current) {
             setRemoteStream(null);
-            setConnectionState('disconnected');
+            setConnectionState('waiting-for-call');
             if (onSessionTerminatedRef.current) {
               onSessionTerminatedRef.current();
             }
@@ -131,20 +175,27 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
 
         incomingCall.on('error', (err) => {
           console.warn('[WebRTC Admin] Call error:', err);
-          setError('Anruffehler: ' + (err.message || 'Verbindung unterbrochen'));
         });
       });
 
       peer.on('error', (err: any) => {
         console.warn('[WebRTC Admin] Peer error:', err?.type, err?.message);
         if (err?.type === 'unavailable-id') {
-          // If ID is occupied by a lingering connection, wait and retry once
-          console.log('[WebRTC Admin] Admin ID currently registered. Retrying in 1.5s...');
-          setTimeout(() => {
-            if (!isCleanedUpRef.current && sessionId === activeSessionIdRef.current) {
-              connectAdminPeer();
-            }
-          }, 1500);
+          // Guard against infinite reconnect loop: max 3 retries with exponential backoff
+          if (retryCountRef.current < 3) {
+            retryCountRef.current += 1;
+            const delay = retryCountRef.current * 2000;
+            console.log(`[WebRTC Admin] Admin ID busy. Retry ${retryCountRef.current}/3 in ${delay}ms...`);
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = setTimeout(() => {
+              if (!isCleanedUpRef.current && sessionId === activeSessionIdRef.current) {
+                connectAdminPeer();
+              }
+            }, delay);
+          } else {
+            setError('Der Übertragungskanal ist derzeit belegt. Bitte klicken Sie auf "Erneut verbinden".');
+            setConnectionState('error');
+          }
         } else {
           setError('Signalfehler: ' + (err?.message || 'Verbindungsfehler'));
           setConnectionState('error');
@@ -169,7 +220,7 @@ export function useWebRTCAdmin({ sessionId, onSessionTerminated }: UseWebRTCAdmi
       setError('Fehler bei der Initialisierung von PeerJS.');
       setConnectionState('error');
     }
-  }, [sessionId, cleanup]);
+  }, [sessionId]);
 
   useEffect(() => {
     if (sessionId === activeSessionIdRef.current) return;

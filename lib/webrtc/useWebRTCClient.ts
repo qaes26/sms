@@ -233,6 +233,14 @@ export function useWebRTCClient({ sessionId, onSessionEnded }: UseWebRTCClientPr
           return;
         }
 
+        // Clean up previous call attempt if not connected yet
+        if (callRef.current) {
+          try {
+            callRef.current.close();
+          } catch (_) {}
+          callRef.current = null;
+        }
+
         console.log(`[WebRTC Client] Calling Admin peer: ${adminPeerId}`);
         const call = peer.call(adminPeerId, stream);
         if (!call) return;

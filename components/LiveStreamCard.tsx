@@ -39,7 +39,9 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
     (el: HTMLVideoElement | null) => {
       videoRef.current = el;
       if (el && remoteStream) {
-        el.srcObject = remoteStream;
+        if (el.srcObject !== remoteStream) {
+          el.srcObject = remoteStream;
+        }
         el.muted = isMuted;
         el.play().catch((e) => console.warn('[Admin Video Autoplay]', e));
       }
@@ -49,7 +51,9 @@ export const LiveStreamCard: React.FC<LiveStreamCardProps> = ({
 
   useEffect(() => {
     if (videoRef.current && remoteStream) {
-      videoRef.current.srcObject = remoteStream;
+      if (videoRef.current.srcObject !== remoteStream) {
+        videoRef.current.srcObject = remoteStream;
+      }
       videoRef.current.muted = isMuted;
       videoRef.current.play().catch((e) => console.warn('[Admin Video Autoplay]', e));
     }

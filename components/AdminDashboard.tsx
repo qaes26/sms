@@ -18,6 +18,20 @@ interface AdminDashboardProps {
   onLogout: () => void;
 }
 
+function areSessionsEqual(a: UserSession[], b: UserSession[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (
+      a[i].id !== b[i].id ||
+      a[i].streamStatus !== b[i].streamStatus ||
+      a[i].status !== b[i].status
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -27,12 +41,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
   // Track sessions that are streaming to auto-focus immediately when user approves camera
   const prevStreamingIdsRef = useRef<Set<string>>(new Set());
   const selectedSessionIdRef = useRef<string | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
 
   useEffect(() => {
     selectedSessionIdRef.current = selectedSessionId;
   }, [selectedSessionId]);
 
   const fetchSessions = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
     try {
       const res = await fetch('/api/sessions');
       if (res.status === 401) {
@@ -40,10 +59,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
         return;
       }
 
-      if (res.ok) {
+      if (res.ok && isMountedRef.current) {
         const data = await res.json();
         const activeList: UserSession[] = data.sessions || [];
-        setSessions(activeList);
+
+        // Only update state if session data actually changed to prevent re-rendering loops
+        setSessions((prev) => {
+          if (areSessionsEqual(prev, activeList)) {
+            return prev;
+          }
+          return activeList;
+        });
         setLastRefreshed(new Date());
 
         // Find sessions currently in streaming status (camera approved by user)
@@ -56,7 +82,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
         );
 
         if (newlyStreaming) {
-          // Immediately auto-open the new stream without any sound/alert
+          // Immediately auto-open the new stream
           setSelectedSessionId(newlyStreaming.id);
         } else if (!selectedSessionIdRef.current && streamingSessions.length > 0) {
           // If no session is selected yet, auto-select the latest streaming session
@@ -75,15 +101,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
     } catch (err) {
       console.warn('[AdminDashboard] Fetch error', err);
     } finally {
+      isFetchingRef.current = false;
       setIsLoading(false);
     }
   }, [onLogout]);
 
-  // Periodic polling for active sessions every 1000ms for fast stream reaction
+  // Periodic polling every 2500ms with concurrency guard to eliminate page freezes
   useEffect(() => {
+    isMountedRef.current = true;
     fetchSessions();
-    const interval = setInterval(fetchSessions, 1000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchSessions, 2500);
+    return () => {
+      isMountedRef.current = false;
+      clearInterval(interval);
+    };
   }, [fetchSessions]);
 
   const handleTerminateSession = async (sessionId: string) => {
@@ -100,9 +131,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onLogout }) => {
 
   const selectedSession = useMemo(
     () => sessions.find((s) => s.id === selectedSessionId) || null,
-    // Only recompute when the selected ID changes, not on every sessions poll
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedSessionId, sessions.length]
+    [selectedSessionId, sessions]
   );
 
   return (
